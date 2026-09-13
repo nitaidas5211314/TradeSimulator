@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { EquityChart } from "@/components/charts/EquityChart";
 import { KlineChart, type TradeMarker } from "@/components/charts/KlineChart";
-import { createTimeScaleSync } from "@/components/charts/timeScaleSync";
+import { createTimeScaleSync, type TimeScaleSync } from "@/components/charts/timeScaleSync";
 import { TradingViewWidget, toTradingViewInterval, toTradingViewRange } from "@/components/charts/TradingViewWidget";
 import { Card, Segmented } from "@/components/ui/controls";
 import type { StrategyResult } from "@/lib/backtest/common";
@@ -22,6 +22,8 @@ const MARKER_LABEL: Partial<Record<TradeAction, string>> = {
   takeProfit: "止盈",
   stopLoss: "止损",
   stop: "停止",
+  hedgeOpen: "入场",
+  hedgeClose: "离场",
   liquidation: "强平",
 };
 
@@ -34,6 +36,7 @@ export function ResultsPanel({
   message,
   defaultSelectedId,
   extraCards,
+  renderExtraCharts,
 }: {
   data: MarketDataState;
   results: StrategyResult[] | null;
@@ -45,6 +48,8 @@ export function ResultsPanel({
   defaultSelectedId?: string;
   /** 指标对比表之后追加的卡片（如参数扫描） */
   extraCards?: ReactNode;
+  /** 收益曲线之后追加的图表，可通过 sync 与K线同步时间轴 */
+  renderExtraCharts?: (sync: TimeScaleSync) => ReactNode;
 }) {
   const { dataset, loading, error, stale } = data;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -172,6 +177,8 @@ export function ResultsPanel({
           <ChartPlaceholder height={360} loading={loading} message={message ?? undefined} />
         )}
       </Card>
+
+      {renderExtraCharts?.(sync)}
 
       {results && (
         <>

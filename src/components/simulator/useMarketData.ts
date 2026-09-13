@@ -1,34 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadDataset, loadSymbols, type MarketDataset } from "@/lib/market/client";
+import { loadDataset, loadSymbols, type DatasetRequest, type MarketDataset } from "@/lib/market/client";
 import type { MarketType, SymbolInfo } from "@/lib/market/types";
 import { buildRequest, formKeyOf, type MarketForm } from "./marketForm";
 
-export interface LoadedDataset extends MarketDataset {
-  /** 加载时的行情表单，用于判断参数是否已修改 */
-  formKey: string;
-}
+/** 已加载的数据集；formKey 为加载时的行情表单，用于判断参数是否已修改 */
+export type LoadedDataset<D extends MarketDataset = MarketDataset> = D & { formKey: string };
 
-export type MarketDataState = ReturnType<typeof useMarketData>;
+export type MarketDataState<D extends MarketDataset = MarketDataset> = ReturnType<typeof useMarketData<D>>;
 
 /** 行情表单、交易对列表、K线与资金费率加载 */
-export function useMarketData({
+export function useMarketData<D extends MarketDataset = MarketDataset>({
   initialForm,
   onLoaded,
+  loader,
 }: {
   initialForm: () => MarketForm;
-  onLoaded?: (dataset: LoadedDataset, previous: LoadedDataset | null) => void;
+  onLoaded?: (dataset: LoadedDataset<D>, previous: LoadedDataset<D> | null) => void;
+  /** 自定义加载函数（如同时加载现货与合约），默认加载单个市场 */
+  loader?: (request: DatasetRequest) => Promise<D>;
 }) {
   const [initial] = useState(initialForm);
+  const [loadData] = useState(() => loader ?? (loadDataset as unknown as (request: DatasetRequest) => Promise<D>));
   const [form, setForm] = useState(initial);
   const patch = useCallback((p: Partial<MarketForm>) => setForm((f) => ({ ...f, ...p })), []);
   const [symbolLists, setSymbolLists] = useState<Partial<Record<MarketType, SymbolInfo[]>>>({});
-  const [dataset, setDataset] = useState<LoadedDataset | null>(null);
+  const [dataset, setDataset] = useState<LoadedDataset<D> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadSeq = useRef(0);
-  const datasetRef = useRef<LoadedDataset | null>(null);
+  const datasetRef = useRef<LoadedDataset<D> | null>(null);
   const symbolsRequested = useRef(new Set<MarketType>());
   const onLoadedRef = useRef(onLoaded);
 
@@ -40,9 +42,9 @@ export function useMarketData({
   const formKey = formKeyOf(form);
   const stale = !dataset || dataset.formKey !== formKey;
 
-  const applyLoaded = useCallback((seq: number, key: string, data: MarketDataset) => {
+  const applyLoaded = useCallback((seq: number, key: string, data: D) => {
     if (seq !== loadSeq.current) return;
-    const loaded = { ...data, formKey: key };
+    const loaded = { ...data, formKey: key } as LoadedDataset<D>;
     const previous = datasetRef.current;
     datasetRef.current = loaded;
     setLoading(false);
@@ -61,7 +63,7 @@ export function useMarketData({
     const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
-    loadDataset(requestInfo.request).then(
+    loadData(requestInfo.request).then(
       (data) => applyLoaded(seq, formKey, data),
       (err) => applyFailed(seq, err),
     );
@@ -72,11 +74,11 @@ export function useMarketData({
     const info = buildRequest(initial);
     if (!info.request) return;
     const seq = ++loadSeq.current;
-    loadDataset(info.request).then(
+    loadData(info.request).then(
       (data) => applyLoaded(seq, formKeyOf(initial), data),
       (err) => applyFailed(seq, err),
     );
-  }, [initial, applyLoaded, applyFailed]);
+  }, [initial, loadData, applyLoaded, applyFailed]);
 
   useEffect(() => {
     const market = form.market;

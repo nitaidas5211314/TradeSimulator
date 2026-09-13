@@ -23,6 +23,9 @@ export type TradeAction =
   | "takeProfit"
   | "stopLoss"
   | "stop"
+  | "hedgeOpen"
+  | "hedgeClose"
+  | "rebalance"
   | "liquidation";
 
 export interface Trade {
@@ -34,6 +37,8 @@ export interface Trade {
   action: TradeAction;
   /** 平仓时的已实现盈亏（未扣手续费） */
   profit: number | null;
+  /** 多腿策略中该笔成交所在的市场 */
+  leg?: "spot" | "futures";
 }
 
 export interface EquityPoint {

@@ -111,7 +111,7 @@ export function holdStrategy(qty: number): Strategy {
   };
 }
 
-function computeStats(r: EngineResult, durationMs: number): StrategyStats {
+export function computeStats(r: EngineResult, durationMs: number): StrategyStats {
   const pnl = r.finalEquity - r.initialEquity;
   const years = durationMs / (365 * 24 * 3600 * 1000);
   let annualizedReturn: number | null = null;

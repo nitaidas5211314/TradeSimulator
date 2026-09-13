@@ -63,6 +63,47 @@ export async function loadDataset(r: DatasetRequest): Promise<MarketDataset> {
   };
 }
 
+/** 期现套利数据：candles 为合约K线，spotCandles 为逐根对齐的现货K线 */
+export interface ArbitrageDataset extends MarketDataset {
+  spotCandles: Candle[];
+}
+
+export async function loadArbitrageDataset(r: DatasetRequest): Promise<ArbitrageDataset> {
+  const range = `symbol=${r.symbol}&start=${r.start}&end=${r.end}`;
+  const [spot, futures, funding] = await Promise.all([
+    getJson<{ candles: CompactCandle[] }>(`/api/klines?market=spot&interval=${r.interval}&${range}`),
+    getJson<{ candles: CompactCandle[]; source: DataSource }>(
+      `/api/klines?market=futures&interval=${r.interval}&${range}`,
+    ),
+    getJson<{ rates: FundingRate[]; estimatedFrom: number | null }>(`/api/funding?${range}`),
+  ]);
+
+  // 只保留两边都有的K线，保证逐根对齐
+  const spotByTime = new Map(spot.candles.map((c) => [c[0], c]));
+  const candles: Candle[] = [];
+  const spotCandles: Candle[] = [];
+  for (const c of futures.candles) {
+    const s = spotByTime.get(c[0]);
+    if (!s) continue;
+    candles.push(fromCompact(c));
+    spotCandles.push(fromCompact(s));
+  }
+  if (candles.length === 0) {
+    throw new Error("该时间段现货与合约没有重叠的K线数据，可能该交易对缺少现货或合约");
+  }
+
+  const request = { ...r, market: "futures" as const };
+  return {
+    ...request,
+    key: datasetKey(request),
+    candles,
+    spotCandles,
+    funding: funding.rates,
+    source: futures.source,
+    fundingEstimatedFrom: funding.estimatedFrom,
+  };
+}
+
 export async function loadSymbols(market: MarketType): Promise<SymbolInfo[]> {
   const data = await getJson<{ symbols: SymbolInfo[] }>(`/api/symbols?market=${market}`);
   return data.symbols;

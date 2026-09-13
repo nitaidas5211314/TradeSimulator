@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/grid", label: "网格模拟器" },
-  { href: "/dca", label: "定投模拟器" },
-  { href: "/martingale", label: "马丁格尔模拟器" },
+  { href: "/grid", label: "网格交易" },
+  { href: "/dca", label: "定投" },
+  { href: "/martingale", label: "马丁格尔" },
+  { href: "/arbitrage", label: "期现套利" },
 ];
 
 export function NavLinks() {

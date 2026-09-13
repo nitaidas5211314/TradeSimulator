@@ -17,6 +17,9 @@ const ACTION_LABEL: Record<TradeAction, string> = {
   takeProfit: "止盈",
   stopLoss: "止损",
   stop: "触发停止",
+  hedgeOpen: "对冲建仓",
+  hedgeClose: "对冲平仓",
+  rebalance: "再平衡",
   liquidation: "强制平仓",
 };
 
@@ -65,6 +68,7 @@ export function TradesTable({ result }: { result: StrategyResult }) {
                   }`}
                 >
                   {ACTION_LABEL[t.action]}
+                  {t.leg && <span className="text-muted"> · {t.leg === "spot" ? "现货" : "合约"}</span>}
                 </td>
                 <td className={td}>{fmtPrice(t.price)}</td>
                 <td className={td}>{fmtQty(t.qty)}</td>
