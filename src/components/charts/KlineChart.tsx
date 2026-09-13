@@ -5,6 +5,7 @@ import {
   ColorType,
   CrosshairMode,
   HistogramSeries,
+  LineSeries,
   LineStyle,
   createChart,
   createSeriesMarkers,
@@ -35,6 +36,13 @@ export interface PriceLine {
   title: string;
 }
 
+/** 叠加在价格上的指标线（如均线、通道），values 与 candles 一一对应 */
+export interface KlineOverlay {
+  id: string;
+  color: string;
+  values: (number | null)[];
+}
+
 export const CHART_THEME = {
   layout: {
     background: { type: ColorType.Solid, color: "transparent" },
@@ -56,6 +64,7 @@ const ACCENT = "#f0b90b";
 const MAX_GRID_LINES = 200;
 const NO_LEVELS: number[] = [];
 const NO_PRICE_LINES: PriceLine[] = [];
+const NO_OVERLAYS: KlineOverlay[] = [];
 
 const toTime = (ms: number) => (ms / 1000) as UTCTimestamp;
 const toBar = (c: Candle) => ({ time: toTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close });
@@ -70,6 +79,7 @@ export function KlineChart({
   levels = NO_LEVELS,
   markers,
   priceLines = NO_PRICE_LINES,
+  overlays = NO_OVERLAYS,
   sync,
   height = 440,
 }: {
@@ -77,6 +87,7 @@ export function KlineChart({
   levels?: number[];
   markers: TradeMarker[];
   priceLines?: PriceLine[];
+  overlays?: KlineOverlay[];
   sync?: TimeScaleSync;
   height?: number;
 }) {
@@ -88,6 +99,7 @@ export function KlineChart({
   const levelLinesRef = useRef<IPriceLine[]>([]);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const renderedRef = useRef<Candle[] | null>(null);
+  const overlaySeriesRef = useRef<ISeriesApi<"Line">[]>([]);
 
   useEffect(() => {
     const chart = createChart(containerRef.current!, { ...CHART_THEME, autoSize: true });
@@ -122,6 +134,7 @@ export function KlineChart({
       levelLinesRef.current = [];
       priceLinesRef.current = [];
       renderedRef.current = null;
+      overlaySeriesRef.current = [];
     };
   }, [sync]);
 
@@ -193,6 +206,30 @@ export function KlineChart({
       }),
     );
   }, [priceLines, sync]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const s of overlaySeriesRef.current) chart.removeSeries(s);
+    overlaySeriesRef.current = [];
+    for (const overlay of overlays) {
+      if (overlay.values.length !== candles.length) continue;
+      const line = chart.addSeries(LineSeries, {
+        color: overlay.color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      line.setData(
+        candles.map((c, i) => {
+          const value = overlay.values[i];
+          return value === null ? { time: toTime(c.time) } : { time: toTime(c.time), value };
+        }),
+      );
+      overlaySeriesRef.current.push(line);
+    }
+  }, [overlays, candles, sync]);
 
   useEffect(() => {
     markersRef.current?.setMarkers(

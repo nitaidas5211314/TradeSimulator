@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { EquityChart } from "@/components/charts/EquityChart";
-import { KlineChart } from "@/components/charts/KlineChart";
+import { KlineChart, type KlineOverlay } from "@/components/charts/KlineChart";
 import { createTimeScaleSync, type TimeScaleSync } from "@/components/charts/timeScaleSync";
 import { TradingViewWidget, toTradingViewInterval, toTradingViewRange } from "@/components/charts/TradingViewWidget";
 import { Card, Segmented } from "@/components/ui/controls";
@@ -26,6 +26,7 @@ export function ResultsPanel({
   defaultSelectedId,
   extraCards,
   renderExtraCharts,
+  overlaysFor,
 }: {
   data: MarketDataState;
   results: StrategyResult[] | null;
@@ -39,6 +40,8 @@ export function ResultsPanel({
   extraCards?: ReactNode;
   /** 收益曲线之后追加的图表，可通过 sync 与K线同步时间轴 */
   renderExtraCharts?: (sync: TimeScaleSync) => ReactNode;
+  /** 按K线图当前选中的策略返回叠加指标线；须为稳定引用 */
+  overlaysFor?: (strategyId: string | null) => KlineOverlay[];
 }) {
   const { dataset, loading, error, stale } = data;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -58,6 +61,8 @@ export function ResultsPanel({
     () => (selected && showMarkers ? buildTradeMarkers(selected.trades) : []),
     [selected, showMarkers],
   );
+  const selectedStrategyId = selected?.id ?? null;
+  const overlays = useMemo(() => overlaysFor?.(selectedStrategyId), [overlaysFor, selectedStrategyId]);
 
   const toggleStrategy = useCallback((id: string) => {
     setHidden((prev) => {
@@ -128,7 +133,13 @@ export function ResultsPanel({
       >
         <div hidden={chartTab !== "kline"}>
           {dataset ? (
-            <KlineChart candles={dataset.candles} levels={levels} markers={markers} sync={sync} />
+            <KlineChart
+              candles={dataset.candles}
+              levels={levels}
+              markers={markers}
+              overlays={overlays}
+              sync={sync}
+            />
           ) : (
             <ChartPlaceholder height={440} loading={loading} />
           )}

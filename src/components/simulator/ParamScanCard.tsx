@@ -19,9 +19,12 @@ const METRIC_OPTIONS: { value: Metric; label: string }[] = [
   { value: "maxDrawdown", label: "最大回撤" },
 ];
 
+/** undefined = 尚未计算，null = 参数组合不适用 */
+type Cell = ScanResult | null | undefined;
+
 interface ScanState {
   key: string;
-  results: (ScanResult | null)[][];
+  results: Cell[][];
   done: number;
 }
 
@@ -44,7 +47,7 @@ export function ParamScanCard({
   rows: ScanAxis;
   cols: ScanAxis;
   runKey: string;
-  run: (row: number, col: number) => ScanResult;
+  run: (row: number, col: number) => ScanResult | null;
   onApply?: (row: number, col: number) => void;
   controls?: ReactNode;
 }) {
@@ -63,7 +66,7 @@ export function ParamScanCard({
 
   const start = async () => {
     const key = runKey;
-    const results = rows.values.map(() => cols.values.map((): ScanResult | null => null));
+    const results = rows.values.map(() => cols.values.map((): Cell => undefined));
     let done = 0;
     setRunningKey(key);
     setState({ key, results, done });
@@ -83,13 +86,15 @@ export function ParamScanCard({
     setRunningKey(null);
   };
 
-  const values = current?.results.flat().filter((r): r is ScanResult => r !== null) ?? [];
+  const values = current?.results.flat().filter((r): r is ScanResult => r !== null && r !== undefined) ?? [];
   const valueOf = (r: ScanResult) => (metric === "calmar" ? (r.calmar ?? 0) : r[metric]);
   const maxAbs = Math.max(1e-12, ...values.map((r) => Math.abs(valueOf(r))));
   const best =
     values.length === 0
       ? null
-      : values.reduce((a, b) => (metric === "maxDrawdown" ? (valueOf(b) < valueOf(a) ? b : a) : valueOf(b) > valueOf(a) ? b : a));
+      : values.reduce((a, b) =>
+          metric === "maxDrawdown" ? (valueOf(b) < valueOf(a) ? b : a) : valueOf(b) > valueOf(a) ? b : a,
+        );
 
   const cellStyle = (r: ScanResult) => {
     const v = valueOf(r);
@@ -162,6 +167,13 @@ export function ParamScanCard({
                             >
                               {cellText(r)}
                             </button>
+                          ) : r === null ? (
+                            <div
+                              className="flex h-8 w-[4.5rem] items-center justify-center rounded bg-panel-2/50 text-muted"
+                              title="该参数组合不适用"
+                            >
+                              —
+                            </div>
                           ) : (
                             <div className="h-8 w-[4.5rem] animate-pulse rounded bg-panel-2" />
                           )}

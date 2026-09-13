@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/martingale", label: "马丁格尔" },
   { href: "/arbitrage", label: "期现套利" },
   { href: "/replay", label: "K线复盘" },
+  { href: "/trend", label: "趋势策略" },
 ];
 
 export function NavLinks() {

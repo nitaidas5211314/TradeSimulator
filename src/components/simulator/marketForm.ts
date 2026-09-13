@@ -18,12 +18,15 @@ export function datePreset(days: number, now = Date.now()) {
   return { startDate: fmtDate(now - days * DAY), endDate: fmtDate(now) };
 }
 
-export function createMarketForm(options: { market?: MarketType; days?: number } = {}, now = Date.now()): MarketForm {
+export function createMarketForm(
+  options: { market?: MarketType; days?: number; interval?: IntervalChoice } = {},
+  now = Date.now(),
+): MarketForm {
   return {
     market: options.market ?? "spot",
     symbol: "BTCUSDT",
     ...datePreset(options.days ?? 90, now),
-    interval: "auto",
+    interval: options.interval ?? "auto",
   };
 }
 
