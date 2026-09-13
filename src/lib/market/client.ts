@@ -3,6 +3,7 @@ import {
   fromCompact,
   type Candle,
   type CompactCandle,
+  type DataSource,
   type FundingRate,
   type KlineInterval,
   type MarketType,
@@ -23,6 +24,9 @@ export interface MarketDataset extends DatasetRequest {
   key: string;
   candles: Candle[];
   funding: FundingRate[];
+  source: DataSource;
+  /** 从该时间起的资金费率为估算值 */
+  fundingEstimatedFrom: number | null;
 }
 
 export function datasetKey(r: DatasetRequest) {
@@ -39,15 +43,24 @@ async function getJson<T>(url: string): Promise<T> {
 export async function loadDataset(r: DatasetRequest): Promise<MarketDataset> {
   const range = `symbol=${r.symbol}&start=${r.start}&end=${r.end}`;
   const [klines, funding] = await Promise.all([
-    getJson<{ candles: CompactCandle[] }>(`/api/klines?market=${r.market}&interval=${r.interval}&${range}`),
+    getJson<{ candles: CompactCandle[]; source: DataSource }>(
+      `/api/klines?market=${r.market}&interval=${r.interval}&${range}`,
+    ),
     r.market === "futures"
-      ? getJson<{ rates: FundingRate[] }>(`/api/funding?${range}`)
-      : Promise.resolve({ rates: [] as FundingRate[] }),
+      ? getJson<{ rates: FundingRate[]; estimatedFrom: number | null }>(`/api/funding?${range}`)
+      : Promise.resolve({ rates: [] as FundingRate[], estimatedFrom: null }),
   ]);
   if (klines.candles.length === 0) {
     throw new Error("该时间段没有K线数据，可能交易对尚未上线");
   }
-  return { ...r, key: datasetKey(r), candles: klines.candles.map(fromCompact), funding: funding.rates };
+  return {
+    ...r,
+    key: datasetKey(r),
+    candles: klines.candles.map(fromCompact),
+    funding: funding.rates,
+    source: klines.source,
+    fundingEstimatedFrom: funding.estimatedFrom,
+  };
 }
 
 export async function loadSymbols(market: MarketType): Promise<SymbolInfo[]> {

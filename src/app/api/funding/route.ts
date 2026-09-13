@@ -11,8 +11,8 @@ export async function GET(request: NextRequest) {
   if (!range.ok) return badRequest(range.error);
 
   try {
-    const rates = await fetchFundingRates(symbol.value, range.value.start, range.value.end);
-    return Response.json({ symbol: symbol.value, rates });
+    const { rates, source, estimatedFrom } = await fetchFundingRates(symbol.value, range.value.start, range.value.end);
+    return Response.json({ symbol: symbol.value, source, estimatedFrom, rates });
   } catch (err) {
     const status = err instanceof BinanceError ? err.status : 500;
     return badRequest((err as Error).message, status);

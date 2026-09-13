@@ -38,6 +38,18 @@ HTTPS_PROXY=http://127.0.0.1:7890 npm run dev
 | `BINANCE_SPOT_BASE_URL` | `https://api.binance.com` | 现货接口域名，失败时自动回退到 `data-api.binance.vision` |
 | `BINANCE_FUTURES_BASE_URL` | `https://fapi.binance.com` | U 本位合约接口域名 |
 | `HTTPS_PROXY` / `HTTP_PROXY` | — | 访问 Binance 使用的代理 |
+| `BINANCE_FUTURES_SOURCE` | — | 设为 `archive` 时合约数据强制使用历史归档 |
+| `BINANCE_ARCHIVE_BASE_URL` | `https://data.binance.vision` | 历史归档域名 |
+
+### 合约接口被地区限制（HTTP 451）
+
+`fapi.binance.com` 在部分地区不可用，且没有公共镜像。遇到 451/403 或无法连接时，服务端会自动改用 Binance 官方历史归档 `data.binance.vision`（10 分钟后再尝试接口）：
+
+- K 线：已结束的月份用月文件，当月用日文件，**数据最新到昨天（UTC）**
+- 资金费率：归档只有月文件，尚未归档的最近月份按 1 分钟溢价指数和 Binance 资金费率公式估算（与真实值的误差约为每次 0.0001%～0.002%），页面会标明估算起点
+- 合约交易对列表：用现货 USDT 交易对列表近似
+
+需要今天的实时数据时，请配置能访问 Binance 的 `HTTPS_PROXY`。
 
 ## 常用命令
 

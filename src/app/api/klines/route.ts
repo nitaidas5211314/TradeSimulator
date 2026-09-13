@@ -16,11 +16,18 @@ export async function GET(request: NextRequest) {
   if (!range.ok) return badRequest(range.error);
 
   try {
-    const candles = await fetchKlines(market.value, symbol.value, interval.value, range.value.start, range.value.end);
+    const { candles, source } = await fetchKlines(
+      market.value,
+      symbol.value,
+      interval.value,
+      range.value.start,
+      range.value.end,
+    );
     return Response.json({
       market: market.value,
       symbol: symbol.value,
       interval: interval.value,
+      source,
       candles: candles.map(toCompact),
     });
   } catch (err) {

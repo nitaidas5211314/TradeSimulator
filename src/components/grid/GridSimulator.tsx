@@ -246,6 +246,14 @@ export default function GridSimulator() {
             {summary.first.time > dataset.start + KLINE_INTERVALS[dataset.interval] && (
               <span className="text-accent">数据起始晚于所选日期（交易对上线较晚）</span>
             )}
+            {dataset.source === "archive" && (
+              <span className="basis-full text-[11px] leading-relaxed text-accent">
+                合约行情接口在服务器所在地区不可用，已改用 Binance 官方历史归档 data.binance.vision，数据最新至昨日（UTC）
+                {dataset.fundingEstimatedFrom !== null &&
+                  `；${fmtDateTime(dataset.fundingEstimatedFrom)} 起的资金费率尚未归档，按溢价指数公式估算`}
+                。
+              </span>
+            )}
           </div>
         ) : (
           <div className="rounded-lg border border-line bg-panel px-4 py-3 text-xs text-muted">

@@ -1,8 +1,10 @@
-import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+import { fetchArchiveFunding, fetchArchiveKlines, type ArchiveFunding } from "./binanceArchive";
+import { BinanceError, LruCache, getJson, isRestrictedError, mapWithConcurrency } from "./http";
 import {
   KLINE_INTERVALS,
   MAX_CANDLES,
   type Candle,
+  type DataSource,
   type FundingRate,
   type KlineInterval,
   type MarketType,
@@ -10,6 +12,8 @@ import {
 } from "./types";
 
 // 服务端 Binance 公共行情客户端（无需 API Key）
+
+export { BinanceError };
 
 const SPOT_BASE_URLS = [
   process.env.BINANCE_SPOT_BASE_URL ?? "https://api.binance.com",
@@ -22,50 +26,26 @@ const SPOT_KLINE_LIMIT = 1000;
 const FUTURES_KLINE_LIMIT = 1500;
 const FUNDING_LIMIT = 1000;
 const CHUNK_CONCURRENCY = 5;
-const REQUEST_TIMEOUT_MS = 20_000;
 
-const hasProxy = Boolean(
-  process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy,
-);
-const proxyDispatcher = hasProxy ? new EnvHttpProxyAgent() : undefined;
+// 合约接口没有公共镜像：被地区限制时改用官方历史归档 data.binance.vision。
+// BINANCE_FUTURES_SOURCE=archive 可强制使用归档。
+const FORCE_FUTURES_ARCHIVE = process.env.BINANCE_FUTURES_SOURCE === "archive";
+const FUTURES_API_RETRY_MS = 10 * 60_000;
+let futuresApiBlockedUntil = 0;
 
-export class BinanceError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
-
-async function getJson<T>(url: string, attempt = 0): Promise<T> {
-  let res: { ok: boolean; status: number; text(): Promise<string>; json(): Promise<unknown> };
-  try {
-    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-    res = proxyDispatcher
-      ? await undiciFetch(url, { dispatcher: proxyDispatcher, signal })
-      : await fetch(url, { cache: "no-store", signal });
-  } catch (err) {
-    if (attempt < 2) {
-      await sleep(500 * (attempt + 1));
-      return getJson<T>(url, attempt + 1);
+async function withFuturesFallback<T>(
+  api: () => Promise<T>,
+  archive: () => Promise<T>,
+): Promise<{ data: T; source: DataSource }> {
+  if (!FORCE_FUTURES_ARCHIVE && Date.now() >= futuresApiBlockedUntil) {
+    try {
+      return { data: await api(), source: "api" };
+    } catch (err) {
+      if (!isRestrictedError(err)) throw err;
+      futuresApiBlockedUntil = Date.now() + FUTURES_API_RETRY_MS;
     }
-    throw new BinanceError(`无法连接 Binance：${(err as Error).message}`, 502);
   }
-
-  if (res.status === 429 && attempt < 3) {
-    await sleep(1500 * (attempt + 1));
-    return getJson<T>(url, attempt + 1);
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new BinanceError(`Binance 返回 ${res.status}：${body.slice(0, 200)}`, res.status);
-  }
-  return (await res.json()) as T;
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return { data: await archive(), source: "archive" };
 }
 
 let spotBaseIndex = 0;
@@ -85,29 +65,6 @@ async function spotGet<T>(path: string): Promise<T> {
     }
   }
   throw lastError;
-}
-
-/** 简单的 LRU 缓存 */
-class LruCache<V> {
-  private map = new Map<string, V>();
-  constructor(private readonly max: number) {}
-
-  get(key: string): V | undefined {
-    const value = this.map.get(key);
-    if (value !== undefined) {
-      this.map.delete(key);
-      this.map.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: string, value: V) {
-    this.map.delete(key);
-    this.map.set(key, value);
-    if (this.map.size > this.max) {
-      this.map.delete(this.map.keys().next().value as string);
-    }
-  }
 }
 
 const klineChunkCache = new LruCache<Candle[]>(1000);
@@ -150,14 +107,42 @@ async function fetchKlineChunk(
   return candles;
 }
 
-/** 分段并发拉取 [startTime, endTime] 区间内的全部K线 */
-export async function fetchKlines(
+/** 通过 REST 接口分段并发拉取 */
+async function fetchApiKlines(
   market: MarketType,
   symbol: string,
   interval: KlineInterval,
   startTime: number,
   endTime: number,
 ): Promise<Candle[]> {
+  const chunkSpan = (market === "spot" ? SPOT_KLINE_LIMIT : FUTURES_KLINE_LIMIT) * KLINE_INTERVALS[interval];
+  const chunks: [number, number][] = [];
+  for (let s = startTime; s <= endTime; s += chunkSpan) {
+    chunks.push([s, Math.min(s + chunkSpan - 1, endTime)]);
+  }
+  const results = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, ([s, e]) =>
+    fetchKlineChunk(market, symbol, interval, s, e),
+  );
+
+  const seen = new Set<number>();
+  return results
+    .flat()
+    .filter((c) => {
+      if (c.time < startTime || c.time > endTime || seen.has(c.time)) return false;
+      seen.add(c.time);
+      return true;
+    })
+    .sort((a, b) => a.time - b.time);
+}
+
+/** 拉取 [startTime, endTime] 区间内的全部K线 */
+export async function fetchKlines(
+  market: MarketType,
+  symbol: string,
+  interval: KlineInterval,
+  startTime: number,
+  endTime: number,
+): Promise<{ candles: Candle[]; source: DataSource }> {
   const intervalMs = KLINE_INTERVALS[interval];
   const alignedStart = Math.floor(startTime / intervalMs) * intervalMs;
   const expected = Math.ceil((endTime - alignedStart) / intervalMs);
@@ -165,32 +150,14 @@ export async function fetchKlines(
     throw new BinanceError(`K线数量约 ${expected} 根，超过上限 ${MAX_CANDLES}，请缩短时间范围或增大K线周期`, 400);
   }
 
-  const chunkSpan = (market === "spot" ? SPOT_KLINE_LIMIT : FUTURES_KLINE_LIMIT) * intervalMs;
-  const chunks: [number, number][] = [];
-  for (let s = alignedStart; s <= endTime; s += chunkSpan) {
-    chunks.push([s, Math.min(s + chunkSpan - 1, endTime)]);
+  if (market === "spot") {
+    return { candles: await fetchApiKlines(market, symbol, interval, alignedStart, endTime), source: "api" };
   }
-
-  const results: Candle[][] = new Array(chunks.length);
-  let next = 0;
-  async function worker() {
-    while (next < chunks.length) {
-      const index = next++;
-      const [s, e] = chunks[index];
-      results[index] = await fetchKlineChunk(market, symbol, interval, s, e);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CHUNK_CONCURRENCY, chunks.length) }, worker));
-
-  const seen = new Set<number>();
-  return results
-    .flat()
-    .filter((c) => {
-      if (c.time < alignedStart || c.time > endTime || seen.has(c.time)) return false;
-      seen.add(c.time);
-      return true;
-    })
-    .sort((a, b) => a.time - b.time);
+  const { data, source } = await withFuturesFallback(
+    () => fetchApiKlines(market, symbol, interval, alignedStart, endTime),
+    () => fetchArchiveKlines(symbol, interval, alignedStart, endTime),
+  );
+  return { candles: data, source };
 }
 
 interface RawFunding {
@@ -199,8 +166,7 @@ interface RawFunding {
   markPrice: string;
 }
 
-/** 拉取 U 本位永续合约历史资金费率 */
-export async function fetchFundingRates(symbol: string, startTime: number, endTime: number): Promise<FundingRate[]> {
+async function fetchApiFunding(symbol: string, startTime: number, endTime: number): Promise<FundingRate[]> {
   const key = `${symbol}|${startTime}|${endTime}`;
   const cached = fundingCache.get(key);
   if (cached) return cached;
@@ -227,6 +193,19 @@ export async function fetchFundingRates(symbol: string, startTime: number, endTi
   return rates;
 }
 
+/** 拉取 U 本位永续合约历史资金费率 */
+export async function fetchFundingRates(
+  symbol: string,
+  startTime: number,
+  endTime: number,
+): Promise<ArchiveFunding & { source: DataSource }> {
+  const { data, source } = await withFuturesFallback<ArchiveFunding>(
+    async () => ({ rates: await fetchApiFunding(symbol, startTime, endTime), estimatedFrom: null }),
+    () => fetchArchiveFunding(symbol, startTime, endTime),
+  );
+  return { ...data, source };
+}
+
 const SYMBOL_CACHE_MS = 60 * 60 * 1000;
 const POPULAR_BASES = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "TRX", "LINK", "AVAX", "SUI", "TON", "LTC", "DOT"];
 
@@ -244,26 +223,32 @@ export async function fetchSymbols(market: MarketType): Promise<SymbolInfo[]> {
       .filter((s) => s.quoteAsset === "USDT" && s.status === "TRADING")
       .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset }));
   } else {
-    const info = await getJson<{
-      symbols: {
-        symbol: string;
-        baseAsset: string;
-        quoteAsset: string;
-        status: string;
-        contractType: string;
-        onboardDate: number;
-      }[];
-    }>(`${FUTURES_BASE_URL}/fapi/v1/exchangeInfo`);
-    symbols = info.symbols
-      .filter((s) => s.quoteAsset === "USDT" && s.status === "TRADING" && s.contractType === "PERPETUAL")
-      .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset, onboardDate: s.onboardDate }));
+    try {
+      const info = await getJson<{
+        symbols: {
+          symbol: string;
+          baseAsset: string;
+          quoteAsset: string;
+          status: string;
+          contractType: string;
+          onboardDate: number;
+        }[];
+      }>(`${FUTURES_BASE_URL}/fapi/v1/exchangeInfo`);
+      symbols = info.symbols
+        .filter((s) => s.quoteAsset === "USDT" && s.status === "TRADING" && s.contractType === "PERPETUAL")
+        .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset, onboardDate: s.onboardDate }));
+    } catch (err) {
+      if (!isRestrictedError(err)) throw err;
+      // 合约接口受限时用现货列表近似，绝大多数永续合约都有同名现货
+      symbols = await fetchSymbols("spot");
+    }
   }
 
   const rank = (s: SymbolInfo) => {
     const i = POPULAR_BASES.indexOf(s.baseAsset);
     return i === -1 ? POPULAR_BASES.length : i;
   };
-  symbols.sort((a, b) => rank(a) - rank(b) || a.symbol.localeCompare(b.symbol));
+  symbols = [...symbols].sort((a, b) => rank(a) - rank(b) || a.symbol.localeCompare(b.symbol));
 
   symbolCache.set(market, { at: Date.now(), symbols });
   return symbols;

@@ -30,7 +30,12 @@ export interface FundingRate {
   time: number;
   rate: number;
   markPrice: number | null;
+  /** 尚未归档、由溢价指数估算的费率 */
+  estimated?: boolean;
 }
+
+/** api = Binance REST 接口；archive = data.binance.vision 历史归档 */
+export type DataSource = "api" | "archive";
 
 export interface SymbolInfo {
   symbol: string;
