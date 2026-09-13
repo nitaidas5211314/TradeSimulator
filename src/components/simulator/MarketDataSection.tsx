@@ -30,10 +30,13 @@ export function MarketDataSection({
   data,
   markets = ["spot", "futures"],
   datePresets = DEFAULT_DATE_PRESETS,
+  showSymbol = true,
 }: {
   data: MarketDataState;
   markets?: MarketType[];
   datePresets?: DatePresetOption[];
+  /** 多资产页面自行管理交易对时隐藏 */
+  showSymbol?: boolean;
 }) {
   const { form, patch, symbols, requestInfo, loading, stale, load } = data;
   const onboard = symbols.find((s) => s.symbol === form.symbol.toUpperCase())?.onboardDate;
@@ -48,27 +51,29 @@ export function MarketDataSection({
         />
       )}
 
-      <Field
-        label="交易对"
-        hint={
-          onboard && form.market === "futures" && requestInfo.request && onboard > requestInfo.request.start
-            ? `该合约 ${fmtDate(onboard)} 上线，早于此日期无数据`
-            : undefined
-        }
-      >
-        <input
-          className={`${inputClass} num uppercase`}
-          list={`symbols-${form.market}`}
-          value={form.symbol}
-          placeholder="BTCUSDT"
-          onChange={(e) => patch({ symbol: e.target.value.toUpperCase().trim() })}
-        />
-        <datalist id={`symbols-${form.market}`}>
-          {symbols.map((s) => (
-            <option key={s.symbol} value={s.symbol} />
-          ))}
-        </datalist>
-      </Field>
+      {showSymbol && (
+        <Field
+          label="交易对"
+          hint={
+            onboard && form.market === "futures" && requestInfo.request && onboard > requestInfo.request.start
+              ? `该合约 ${fmtDate(onboard)} 上线，早于此日期无数据`
+              : undefined
+          }
+        >
+          <input
+            className={`${inputClass} num uppercase`}
+            list={`symbols-${form.market}`}
+            value={form.symbol}
+            placeholder="BTCUSDT"
+            onChange={(e) => patch({ symbol: e.target.value.toUpperCase().trim() })}
+          />
+          <datalist id={`symbols-${form.market}`}>
+            {symbols.map((s) => (
+              <option key={s.symbol} value={s.symbol} />
+            ))}
+          </datalist>
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Field label="开始日期">

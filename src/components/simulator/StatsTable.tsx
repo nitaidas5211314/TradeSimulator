@@ -32,10 +32,12 @@ export function StatsTable({
   results,
   futures,
   columns,
+  showPosition = true,
 }: {
   results: StrategyResult[];
   futures: boolean;
   columns: StatColumn[];
+  showPosition?: boolean;
 }) {
   const th = "whitespace-nowrap px-3 py-2 text-right font-normal";
   const td = "num whitespace-nowrap px-3 py-2.5 text-right";
@@ -62,7 +64,7 @@ export function StatsTable({
                 资金费
               </th>
             )}
-            <th className={th}>期末持仓</th>
+            {showPosition && <th className={th}>期末持仓</th>}
             <th className={`${th} text-left`}>状态</th>
           </tr>
         </thead>
@@ -94,13 +96,15 @@ export function StatsTable({
                     {fmtUsd(s.fundingPaid, true)}
                   </td>
                 )}
-                <td
-                  className={`${td} ${s.finalPosition > 0 ? "text-up" : s.finalPosition < 0 ? "text-down" : "text-muted"}`}
-                >
-                  {s.finalPosition === 0
-                    ? "0"
-                    : `${s.finalPosition > 0 ? "多 " : "空 "}${fmtQty(Math.abs(s.finalPosition))}`}
-                </td>
+                {showPosition && (
+                  <td
+                    className={`${td} ${s.finalPosition > 0 ? "text-up" : s.finalPosition < 0 ? "text-down" : "text-muted"}`}
+                  >
+                    {s.finalPosition === 0
+                      ? "0"
+                      : `${s.finalPosition > 0 ? "多 " : "空 "}${fmtQty(Math.abs(s.finalPosition))}`}
+                  </td>
+                )}
                 <td className="whitespace-nowrap px-3 py-2.5">
                   {r.liquidation ? (
                     <span className="rounded bg-down/15 px-1.5 py-0.5 text-down">

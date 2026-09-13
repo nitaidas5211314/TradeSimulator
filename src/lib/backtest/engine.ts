@@ -39,6 +39,8 @@ export interface Trade {
   profit: number | null;
   /** 多腿策略中该笔成交所在的市场 */
   leg?: "spot" | "futures";
+  /** 多资产策略中该笔成交的交易对 */
+  symbol?: string;
 }
 
 export interface EquityPoint {

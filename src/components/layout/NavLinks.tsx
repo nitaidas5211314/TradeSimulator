@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/arbitrage", label: "期现套利" },
   { href: "/replay", label: "K线复盘" },
   { href: "/trend", label: "趋势策略" },
+  { href: "/rebalance", label: "组合再平衡" },
 ];
 
 export function NavLinks() {

@@ -104,6 +104,48 @@ export async function loadArbitrageDataset(r: DatasetRequest): Promise<Arbitrage
   };
 }
 
+/** 多资产组合数据：assetCandles 为各资产逐根对齐的现货K线，candles 为第一个资产 */
+export interface PortfolioDataset extends MarketDataset {
+  symbols: string[];
+  assetCandles: Candle[][];
+}
+
+export async function loadPortfolioDataset(r: DatasetRequest, symbols: string[]): Promise<PortfolioDataset> {
+  if (symbols.length === 0) throw new Error("请至少设置一个资产");
+  const lists = await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const data = await getJson<{ candles: CompactCandle[] }>(
+          `/api/klines?market=spot&interval=${r.interval}&symbol=${symbol}&start=${r.start}&end=${r.end}`,
+        );
+        return data.candles;
+      } catch (err) {
+        throw new Error(`${symbol}：${(err as Error).message}`);
+      }
+    }),
+  );
+
+  // 只保留所有资产都有数据的时间点
+  const byTime = lists.map((list) => new Map(list.map((c) => [c[0], c])));
+  const times = lists[0].map((c) => c[0]).filter((t) => byTime.every((map) => map.has(t)));
+  if (times.length === 0) {
+    throw new Error("所选资产在该时间段没有共同的K线数据，可能有资产上线较晚");
+  }
+  const assetCandles = byTime.map((map) => times.map((t) => fromCompact(map.get(t) as CompactCandle)));
+
+  const request = { ...r, market: "spot" as const, symbol: symbols[0] };
+  return {
+    ...request,
+    key: `${datasetKey(request)}|${symbols.join(",")}`,
+    candles: assetCandles[0],
+    funding: [],
+    source: "api",
+    fundingEstimatedFrom: null,
+    symbols,
+    assetCandles,
+  };
+}
+
 export async function loadSymbols(market: MarketType): Promise<SymbolInfo[]> {
   const data = await getJson<{ symbols: SymbolInfo[] }>(`/api/symbols?market=${market}`);
   return data.symbols;

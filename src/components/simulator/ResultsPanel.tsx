@@ -27,6 +27,9 @@ export function ResultsPanel({
   extraCards,
   renderExtraCharts,
   overlaysFor,
+  summary,
+  renderPriceChart,
+  showPosition = true,
 }: {
   data: MarketDataState;
   results: StrategyResult[] | null;
@@ -42,6 +45,12 @@ export function ResultsPanel({
   renderExtraCharts?: (sync: TimeScaleSync) => ReactNode;
   /** 按K线图当前选中的策略返回叠加指标线；须为稳定引用 */
   overlaysFor?: (strategyId: string | null) => KlineOverlay[];
+  /** 替换默认的行情概览（为 null 时显示加载提示） */
+  summary?: ReactNode;
+  /** 替换默认的K线 / TradingView 图表卡片（如多资产走势） */
+  renderPriceChart?: (sync: TimeScaleSync) => ReactNode;
+  /** 指标表是否显示期末持仓列（多资产组合时隐藏） */
+  showPosition?: boolean;
 }) {
   const { dataset, loading, error, stale } = data;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -86,8 +95,11 @@ export function ResultsPanel({
         </div>
       )}
 
-      <DatasetSummary dataset={dataset} loading={loading} />
+      {summary ?? <DatasetSummary dataset={dataset} loading={loading} />}
 
+      {renderPriceChart ? (
+        renderPriceChart(sync)
+      ) : (
       <Card
         title={
           <Segmented
@@ -158,6 +170,7 @@ export function ResultsPanel({
           </div>
         )}
       </Card>
+      )}
 
       <Card
         title="收益曲线对比"
@@ -175,7 +188,12 @@ export function ResultsPanel({
       {results && (
         <>
           <Card title="策略指标对比">
-            <StatsTable results={results} futures={dataset?.market === "futures"} columns={columns} />
+            <StatsTable
+              results={results}
+              futures={dataset?.market === "futures"}
+              columns={columns}
+              showPosition={showPosition}
+            />
           </Card>
 
           {extraCards}

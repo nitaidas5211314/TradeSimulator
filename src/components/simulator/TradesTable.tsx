@@ -68,6 +68,7 @@ export function TradesTable({ trades, newestFirst = false }: { trades: Trade[]; 
                 >
                   {ACTION_LABEL[t.action]}
                   {t.leg && <span className="text-muted"> · {t.leg === "spot" ? "现货" : "合约"}</span>}
+                  {t.symbol && <span className="text-muted"> · {t.symbol}</span>}
                 </td>
                 <td className={td}>{fmtPrice(t.price)}</td>
                 <td className={td}>{fmtQty(t.qty)}</td>
