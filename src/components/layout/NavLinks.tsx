@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const LINKS = [{ href: "/grid", label: "网格模拟器" }];
+const LINKS = [
+  { href: "/grid", label: "网格模拟器" },
+  { href: "/dca", label: "定投模拟器" },
+  { href: "/martingale", label: "马丁格尔模拟器" },
+];
 
 export function NavLinks() {
   const pathname = usePathname();
@@ -23,9 +27,6 @@ export function NavLinks() {
           </Link>
         );
       })}
-      <span className="cursor-not-allowed text-muted/50" title="即将推出">
-        更多策略 · 即将推出
-      </span>
     </nav>
   );
 }

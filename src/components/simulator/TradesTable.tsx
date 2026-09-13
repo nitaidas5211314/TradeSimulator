@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import type { StrategyResult } from "@/lib/backtest/common";
 import type { TradeAction } from "@/lib/backtest/engine";
-import type { StrategyResult } from "@/lib/backtest/grid";
 import { fmtDateTime, fmtPrice, fmtQty, fmtUsd, pnlClass } from "@/lib/format";
 
 const PAGE_SIZE = 50;
@@ -11,6 +11,11 @@ const ACTION_LABEL: Record<TradeAction, string> = {
   init: "初始建仓",
   open: "开仓",
   close: "平仓",
+  dca: "定投买入",
+  base: "首单",
+  safety: "加仓",
+  takeProfit: "止盈",
+  stopLoss: "止损",
   liquidation: "强制平仓",
 };
 
@@ -43,7 +48,7 @@ export function TradesTable({ result }: { result: StrategyResult }) {
               <th className={th}>数量</th>
               <th className={th}>成交额</th>
               <th className={th}>手续费</th>
-              <th className={th}>网格利润</th>
+              <th className={th}>已实现盈亏</th>
             </tr>
           </thead>
           <tbody>
@@ -53,7 +58,11 @@ export function TradesTable({ result }: { result: StrategyResult }) {
                 <td className={`whitespace-nowrap px-3 py-2 ${t.side === "buy" ? "text-up" : "text-down"}`}>
                   {t.side === "buy" ? "买入" : "卖出"}
                 </td>
-                <td className={`whitespace-nowrap px-3 py-2 ${t.action === "liquidation" ? "text-down" : ""}`}>
+                <td
+                  className={`whitespace-nowrap px-3 py-2 ${
+                    t.action === "liquidation" || t.action === "stopLoss" ? "text-down" : ""
+                  }`}
+                >
                   {ACTION_LABEL[t.action]}
                 </td>
                 <td className={td}>{fmtPrice(t.price)}</td>
@@ -92,7 +101,15 @@ export function TradesTable({ result }: { result: StrategyResult }) {
   );
 }
 
-function PageButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled: boolean }) {
+function PageButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled: boolean;
+}) {
   return (
     <button
       type="button"

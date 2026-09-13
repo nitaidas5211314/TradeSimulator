@@ -1,57 +1,33 @@
 import type { Candle, FundingRate, MarketType } from "@/lib/market/types";
-import { runEngine, type EngineResult, type GridCells } from "./engine";
+import {
+  HOLD_META,
+  holdStrategy,
+  runStrategies,
+  validateCosts,
+  type CostParams,
+  type StrategyMeta,
+  type StrategyResult,
+  type StrategyRun,
+} from "./common";
+import type { Strategy, StrategyContext } from "./engine";
 
 export type GridMode = "arithmetic" | "geometric";
 export type GridDirection = "long" | "short" | "neutral";
 
-export type StrategyId = "spot-hold" | "spot-grid" | "futures-hold" | "long-grid" | "short-grid" | "neutral-grid";
-
-export const STRATEGY_META: Record<StrategyId, { name: string; color: string; description: string }> = {
-  "spot-hold": { name: "现货持有", color: "#f0b90b", description: "开始时全部资金市价买入并持有到结束" },
+export const GRID_META = {
   "spot-grid": { name: "现货网格", color: "#3b82f6", description: "区间内低买高卖，价格上方的格子初始买入底仓" },
-  "futures-hold": { name: "合约买入持有", color: "#f59e0b", description: "按杠杆市价开多并持有到结束，计入资金费" },
   "long-grid": { name: "做多网格", color: "#22c55e", description: "只做多：价格上方格子初始开多，下跌逐格加多、上涨逐格平多" },
   "short-grid": { name: "做空网格", color: "#ef4444", description: "只做空：价格下方格子初始开空，上涨逐格加空、下跌逐格平空" },
   "neutral-grid": { name: "中性网格", color: "#a855f7", description: "不建初始仓：上方格子开空、下方格子开多" },
-};
+} satisfies Record<string, StrategyMeta>;
 
-export interface SimulationParams {
+export interface GridParams extends CostParams {
   market: MarketType;
   investment: number;
   lower: number;
   upper: number;
   gridCount: number;
   gridMode: GridMode;
-  leverage: number;
-  makerFee: number;
-  takerFee: number;
-  maintenanceMarginRate: number;
-  includeFunding: boolean;
-}
-
-export interface StrategyStats {
-  finalEquity: number;
-  pnl: number;
-  returnPct: number;
-  annualizedReturn: number | null;
-  maxDrawdown: number;
-  gridProfit: number;
-  matchedCount: number;
-  tradeCount: number;
-  feesPaid: number;
-  fundingPaid: number;
-  fundingCount: number;
-  /** 持仓浮动/方向性盈亏 = 总盈亏 - 网格利润 + 手续费 + 资金费 */
-  positionPnl: number;
-  finalPosition: number;
-}
-
-export interface StrategyResult extends EngineResult {
-  id: StrategyId;
-  name: string;
-  color: string;
-  description: string;
-  stats: StrategyStats;
 }
 
 export const MAX_GRID_COUNT = 500;
@@ -81,19 +57,24 @@ export function gridProfitRange(levels: number[], makerFee: number) {
   return { min, max };
 }
 
-export function validateParams(p: SimulationParams): string | null {
+export function validateGridParams(p: GridParams): string | null {
   if (!(p.investment > 0)) return "投入资金必须大于 0";
   if (!(p.lower > 0) || !(p.upper > 0)) return "价格上下限必须大于 0";
   if (p.lower >= p.upper) return "价格下限必须小于价格上限";
   if (!Number.isInteger(p.gridCount) || p.gridCount < 2 || p.gridCount > MAX_GRID_COUNT) {
     return `网格数量须为 2 ~ ${MAX_GRID_COUNT} 的整数`;
   }
-  if (p.makerFee < 0 || p.takerFee < 0 || p.makerFee >= 0.1 || p.takerFee >= 0.1) return "手续费率不合法";
-  if (p.market === "futures") {
-    if (!(p.leverage >= 1 && p.leverage <= 125)) return "杠杆倍数须在 1 ~ 125 之间";
-    if (!(p.maintenanceMarginRate >= 0 && p.maintenanceMarginRate < 0.5)) return "维持保证金率不合法";
-  }
-  return null;
+  return validateCosts(p.market, p);
+}
+
+/** 网格单元：价格区间 [levels[i], levels[i+1]] */
+export interface GridCells {
+  levels: number[];
+  /** 1 = 多头格（低买高卖），-1 = 空头格（高卖低买） */
+  side: (1 | -1)[];
+  /** 初始是否已持仓（按开盘价市价建仓） */
+  open: boolean[];
+  qtyPerCell: number;
 }
 
 /**
@@ -127,87 +108,113 @@ export function buildGridCells(
   return { levels, side, open, qtyPerCell: notional / (capitalPerUnit * (1 + feeReserve)) };
 }
 
+export function gridStrategy(cells: GridCells): Strategy {
+  const { levels, side, qtyPerCell: q } = cells;
+  const cellCount = levels.length - 1;
+  const open = cells.open.slice();
+  const entry = new Array<number>(cellCount).fill(0);
+
+  const fill = (ctx: StrategyContext, cell: number, price: number) => {
+    const opening = !open[cell];
+    // 多头格开仓/空头格平仓是买入，反之是卖出
+    const buy = (side[cell] === 1) === opening;
+    let profit: number | undefined;
+    if (opening) entry[cell] = price;
+    else profit = side[cell] * q * (price - entry[cell]);
+    open[cell] = opening;
+    ctx.trade(buy ? q : -q, price, { maker: true, action: opening ? "open" : "close", profit });
+  };
+
+  return {
+    start(ctx, price) {
+      let initQty = 0;
+      for (let i = 0; i < cellCount; i++) {
+        if (!open[i]) continue;
+        initQty += side[i] * q;
+        entry[i] = price;
+      }
+      if (initQty !== 0) ctx.trade(initQty, price, { maker: false, action: "init" });
+    },
+
+    onMove(ctx, a, b) {
+      if (b < a) {
+        // 下跌：触发买单（多头格开仓 @lo、空头格平仓 @lo）
+        for (let j = upperBound(levels, a) - 1; j >= 0 && levels[j] >= b; j--) {
+          if (j >= cellCount) continue;
+          const isBuyOrder = side[j] === 1 ? !open[j] : open[j];
+          if (isBuyOrder) fill(ctx, j, levels[j]);
+        }
+      } else {
+        // 上涨：触发卖单（多头格平仓 @hi、空头格开仓 @hi）
+        for (let j = lowerBound(levels, a); j < levels.length && levels[j] <= b; j++) {
+          if (j === 0) continue;
+          const cell = j - 1;
+          const isSellOrder = side[cell] === 1 ? open[cell] : !open[cell];
+          if (isSellOrder) fill(ctx, cell, levels[j]);
+        }
+      }
+    },
+  };
+}
+
 export function runGridSimulation(
   candles: Candle[],
   funding: FundingRate[],
   intervalMs: number,
-  p: SimulationParams,
+  p: GridParams,
 ): StrategyResult[] {
   const startPrice = candles[0].open;
   const levels = buildGridLevels(p.lower, p.upper, p.gridCount, p.gridMode);
-  const base = {
-    candles,
-    intervalMs,
-    investment: p.investment,
-    makerFee: p.makerFee,
-    takerFee: p.takerFee,
-    maintenanceMarginRate: p.maintenanceMarginRate,
-    funding: p.includeFunding ? funding : [],
-  };
+  const notional = p.investment * p.leverage;
 
-  const runs: { id: StrategyId; result: EngineResult }[] = [];
+  const runs: StrategyRun[] =
+    p.market === "spot"
+      ? [
+          {
+            id: "spot-hold",
+            meta: HOLD_META.spot,
+            strategy: holdStrategy(p.investment / (startPrice * (1 + p.takerFee))),
+          },
+          {
+            id: "spot-grid",
+            meta: GRID_META["spot-grid"],
+            strategy: gridStrategy(
+              buildGridCells(levels, "long", startPrice, p.investment, Math.max(p.makerFee, p.takerFee)),
+            ),
+          },
+        ]
+      : [
+          { id: "futures-hold", meta: HOLD_META.futures, strategy: holdStrategy(notional / startPrice) },
+          ...(["long", "short", "neutral"] as const).map((direction) => ({
+            id: `${direction}-grid`,
+            meta: GRID_META[`${direction}-grid`],
+            strategy: gridStrategy(buildGridCells(levels, direction, startPrice, notional, 0)),
+          })),
+        ];
 
-  if (p.market === "spot") {
-    const spot = { ...base, futures: false };
-    runs.push({
-      id: "spot-hold",
-      result: runEngine({ ...spot, grid: null, holdQty: p.investment / (startPrice * (1 + p.takerFee)) }),
-    });
-    runs.push({
-      id: "spot-grid",
-      result: runEngine({
-        ...spot,
-        grid: buildGridCells(levels, "long", startPrice, p.investment, Math.max(p.makerFee, p.takerFee)),
-        holdQty: 0,
-      }),
-    });
-  } else {
-    const fut = { ...base, futures: true };
-    const notional = p.investment * p.leverage;
-    runs.push({ id: "futures-hold", result: runEngine({ ...fut, grid: null, holdQty: notional / startPrice }) });
-    const directions: [StrategyId, GridDirection][] = [
-      ["long-grid", "long"],
-      ["short-grid", "short"],
-      ["neutral-grid", "neutral"],
-    ];
-    for (const [id, direction] of directions) {
-      runs.push({
-        id,
-        result: runEngine({ ...fut, grid: buildGridCells(levels, direction, startPrice, notional, 0), holdQty: 0 }),
-      });
-    }
-  }
-
-  const durationMs = candles[candles.length - 1].time + intervalMs - candles[0].time;
-  return runs.map(({ id, result }) => ({
-    ...result,
-    id,
-    ...STRATEGY_META[id],
-    stats: computeStats(result, durationMs),
-  }));
+  return runStrategies({ candles, funding, intervalMs, market: p.market, investment: p.investment, costs: p }, runs);
 }
 
-function computeStats(r: EngineResult, durationMs: number): StrategyStats {
-  const pnl = r.finalEquity - r.initialEquity;
-  const years = durationMs / (365 * 24 * 3600 * 1000);
-  let annualizedReturn: number | null = null;
-  // 少于 7 天的年化没有意义
-  if (years >= 7 / 365) {
-    annualizedReturn = r.finalEquity <= 0 ? -1 : Math.pow(r.finalEquity / r.initialEquity, 1 / years) - 1;
+/** 第一个 >= value 的下标 */
+function lowerBound(arr: number[], value: number) {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < value) lo = mid + 1;
+    else hi = mid;
   }
-  return {
-    finalEquity: r.finalEquity,
-    pnl,
-    returnPct: pnl / r.initialEquity,
-    annualizedReturn,
-    maxDrawdown: r.maxDrawdown,
-    gridProfit: r.gridProfit,
-    matchedCount: r.matchedCount,
-    tradeCount: r.trades.length,
-    feesPaid: r.feesPaid,
-    fundingPaid: r.fundingPaid,
-    fundingCount: r.fundingCount,
-    positionPnl: pnl - r.gridProfit + r.feesPaid + r.fundingPaid,
-    finalPosition: r.finalPosition,
-  };
+  return lo;
+}
+
+/** 第一个 > value 的下标 */
+function upperBound(arr: number[], value: number) {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] <= value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }

@@ -1,21 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Candle, FundingRate } from "@/lib/market/types";
-import { buildGridLevels, runGridSimulation, type SimulationParams, type StrategyId } from "./grid";
+import { buildGridLevels, runGridSimulation, type GridParams } from "./grid";
+import { HOUR, T0, candlesFromCloses } from "./testUtils";
 
-const HOUR = 3_600_000;
-const T0 = Date.UTC(2025, 0, 1);
-
-/** 按收盘价序列生成K线：每根开盘价为上一根收盘价，高低点为两者极值 */
-function candlesFromCloses(start: number, closes: number[]): Candle[] {
-  let prev = start;
-  return closes.map((close, i) => {
-    const c = { time: T0 + i * HOUR, open: prev, high: Math.max(prev, close), low: Math.min(prev, close), close, volume: 0 };
-    prev = close;
-    return c;
-  });
-}
-
-const baseParams: SimulationParams = {
+const baseParams: GridParams = {
   market: "spot",
   investment: 1000,
   lower: 90,
@@ -29,9 +17,9 @@ const baseParams: SimulationParams = {
   includeFunding: true,
 };
 
-function run(candles: Candle[], params: Partial<SimulationParams>, funding: FundingRate[] = []) {
+function run(candles: Candle[], params: Partial<GridParams>, funding: FundingRate[] = []) {
   const results = runGridSimulation(candles, funding, HOUR, { ...baseParams, ...params });
-  return (id: StrategyId) => {
+  return (id: string) => {
     const r = results.find((x) => x.id === id);
     if (!r) throw new Error(`missing ${id}`);
     return r;
@@ -61,11 +49,11 @@ describe("spot strategies", () => {
     const get = run(candlesFromCloses(100, [110, 90, 110, 100]), {});
     const grid = get("spot-grid");
     const q = 1000 / 190; // 上格按开盘价 100 建仓，下格按挂单价 90 预留
-    expect(grid.matchedCount).toBe(3);
-    expect(grid.gridProfit).toBeCloseTo(30 * q, 6);
+    expect(grid.closeCount).toBe(3);
+    expect(grid.realizedPnl).toBeCloseTo(30 * q, 6);
     // 期末价格回到 100，持仓成本也是 100，总收益 = 网格利润
     expect(grid.finalEquity).toBeCloseTo(1000 + 30 * q, 6);
-    expect(grid.stats.positionPnl).toBeCloseTo(0, 6);
+    expect(grid.stats.unrealizedPnl).toBeCloseTo(0, 6);
   });
 
   it("follows the intrabar path open → low → high → close", () => {
@@ -78,7 +66,7 @@ describe("spot strategies", () => {
       "close:sell@110",
       "open:buy@100",
     ]);
-    expect(grid.matchedCount).toBe(2);
+    expect(grid.closeCount).toBe(2);
   });
 
   it("measures max drawdown from the running peak", () => {
@@ -99,7 +87,7 @@ describe("spot strategies", () => {
     const feesFromTrades = grid.trades.reduce((sum, t) => sum + t.fee, 0);
     expect(grid.feesPaid).toBeCloseTo(feesFromTrades, 9);
     expect(grid.feesPaid).toBeGreaterThan(0);
-    expect(grid.stats.pnl).toBeCloseTo(grid.gridProfit + grid.stats.positionPnl - grid.feesPaid, 9);
+    expect(grid.stats.pnl).toBeCloseTo(grid.realizedPnl + grid.stats.unrealizedPnl - grid.feesPaid, 9);
   });
 });
 

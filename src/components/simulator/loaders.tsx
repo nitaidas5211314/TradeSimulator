@@ -1,0 +1,24 @@
+"use client";
+
+import dynamic from "next/dynamic";
+
+// 模拟器依赖浏览器端图表和当前日期，关闭 SSR 避免水合不一致
+
+export const GridSimulatorLoader = dynamic(() => import("@/components/grid/GridSimulator"), {
+  ssr: false,
+  loading: () => <LoadingPlaceholder />,
+});
+
+export const DcaSimulatorLoader = dynamic(() => import("@/components/dca/DcaSimulator"), {
+  ssr: false,
+  loading: () => <LoadingPlaceholder />,
+});
+
+export const MartingaleSimulatorLoader = dynamic(() => import("@/components/martingale/MartingaleSimulator"), {
+  ssr: false,
+  loading: () => <LoadingPlaceholder />,
+});
+
+function LoadingPlaceholder() {
+  return <div className="p-8 text-sm text-muted">正在加载模拟器…</div>;
+}

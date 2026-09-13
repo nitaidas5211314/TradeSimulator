@@ -1,9 +1,41 @@
-import type { StrategyResult } from "@/lib/backtest/grid";
+import type { StrategyResult } from "@/lib/backtest/common";
 import { fmtDateTime, fmtPct, fmtPrice, fmtQty, fmtUsd, pnlClass } from "@/lib/format";
 
-const isGrid = (r: StrategyResult) => r.id.endsWith("grid");
+export interface StatCell {
+  text: string;
+  className?: string;
+}
 
-export function StatsTable({ results, futures }: { results: StrategyResult[]; futures: boolean }) {
+/** 策略专属列，插在通用指标之间 */
+export interface StatColumn {
+  key: string;
+  label: string;
+  title?: string;
+  cell: (r: StrategyResult) => StatCell;
+}
+
+type Value = number | null | undefined;
+const missing = (v: Value): v is null | undefined => v === null || v === undefined;
+
+/** 常用单元格格式；值缺失时显示 — */
+export const statCell = {
+  dash: { text: "—", className: "text-muted" } as StatCell,
+  pnl: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtUsd(v, true), className: pnlClass(v) }),
+  usd: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtUsd(v) }),
+  count: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: v.toLocaleString() }),
+  price: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtPrice(v) }),
+  pct: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtPct(v), className: pnlClass(v) }),
+};
+
+export function StatsTable({
+  results,
+  futures,
+  columns,
+}: {
+  results: StrategyResult[];
+  futures: boolean;
+  columns: StatColumn[];
+}) {
   const th = "whitespace-nowrap px-3 py-2 text-right font-normal";
   const td = "num whitespace-nowrap px-3 py-2.5 text-right";
 
@@ -18,13 +50,11 @@ export function StatsTable({ results, futures }: { results: StrategyResult[]; fu
             <th className={th}>收益率</th>
             <th className={th}>年化</th>
             <th className={th}>最大回撤</th>
-            <th className={th} title="已配对（平仓）格子的价差收益，未扣手续费">
-              网格利润
-            </th>
-            <th className={th}>配对次数</th>
-            <th className={th} title="总收益 − 网格利润 + 手续费 + 资金费，即持仓方向带来的盈亏">
-              持仓盈亏
-            </th>
+            {columns.map((c) => (
+              <th key={c.key} className={th} title={c.title}>
+                {c.label}
+              </th>
+            ))}
             <th className={th}>手续费</th>
             {futures && (
               <th className={th} title="正数为支付，负数为收取">
@@ -49,19 +79,26 @@ export function StatsTable({ results, futures }: { results: StrategyResult[]; fu
                 <td className={`${td} ${pnlClass(s.returnPct)}`}>{fmtPct(s.returnPct)}</td>
                 <td className={`${td} ${pnlClass(s.annualizedReturn ?? 0)}`}>{fmtPct(s.annualizedReturn)}</td>
                 <td className={`${td} text-down`}>{fmtPct(-s.maxDrawdown)}</td>
-                <td className={`${td} ${isGrid(r) ? pnlClass(s.gridProfit) : "text-muted"}`}>
-                  {isGrid(r) ? fmtUsd(s.gridProfit, true) : "—"}
-                </td>
-                <td className={td}>{isGrid(r) ? s.matchedCount.toLocaleString() : "—"}</td>
-                <td className={`${td} ${pnlClass(s.positionPnl)}`}>{fmtUsd(s.positionPnl, true)}</td>
+                {columns.map((c) => {
+                  const cell = c.cell(r);
+                  return (
+                    <td key={c.key} className={`${td} ${cell.className ?? ""}`}>
+                      {cell.text}
+                    </td>
+                  );
+                })}
                 <td className={`${td} text-down`}>{fmtUsd(-s.feesPaid)}</td>
                 {futures && (
                   <td className={`${td} ${pnlClass(-s.fundingPaid)}`} title={`共结算 ${s.fundingCount} 次`}>
                     {fmtUsd(s.fundingPaid, true)}
                   </td>
                 )}
-                <td className={`${td} ${s.finalPosition > 0 ? "text-up" : s.finalPosition < 0 ? "text-down" : "text-muted"}`}>
-                  {s.finalPosition === 0 ? "0" : `${s.finalPosition > 0 ? "多 " : "空 "}${fmtQty(Math.abs(s.finalPosition))}`}
+                <td
+                  className={`${td} ${s.finalPosition > 0 ? "text-up" : s.finalPosition < 0 ? "text-down" : "text-muted"}`}
+                >
+                  {s.finalPosition === 0
+                    ? "0"
+                    : `${s.finalPosition > 0 ? "多 " : "空 "}${fmtQty(Math.abs(s.finalPosition))}`}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
                   {r.liquidation ? (

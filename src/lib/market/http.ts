@@ -26,30 +26,37 @@ export interface HttpResponse {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
-export async function httpGet(url: string, attempt = 0): Promise<HttpResponse> {
+export interface RequestOptions {
+  timeoutMs?: number;
+  /** 网络错误时的重试次数 */
+  retries?: number;
+}
+
+export async function httpGet(url: string, options: RequestOptions = {}, attempt = 0): Promise<HttpResponse> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, retries = 2 } = options;
   let res: HttpResponse;
   try {
-    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = AbortSignal.timeout(timeoutMs);
     res = proxyDispatcher
       ? await undiciFetch(url, { dispatcher: proxyDispatcher, signal })
       : await fetch(url, { cache: "no-store", signal });
   } catch (err) {
-    if (attempt < 2) {
+    if (attempt < retries) {
       await sleep(500 * (attempt + 1));
-      return httpGet(url, attempt + 1);
+      return httpGet(url, options, attempt + 1);
     }
     throw new BinanceError(`无法连接 ${new URL(url).host}：${(err as Error).message}`, 502);
   }
 
   if (res.status === 429 && attempt < 3) {
     await sleep(1500 * (attempt + 1));
-    return httpGet(url, attempt + 1);
+    return httpGet(url, options, attempt + 1);
   }
   return res;
 }
 
-export async function getJson<T>(url: string): Promise<T> {
-  const res = await httpGet(url);
+export async function getJson<T>(url: string, options?: RequestOptions): Promise<T> {
+  const res = await httpGet(url, options);
   if (!res.ok) {
     if (res.status === 451 || res.status === 403) {
       throw new BinanceError(

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { GridSimulatorLoader } from "@/components/grid/GridSimulatorLoader";
+import { GridSimulatorLoader } from "@/components/simulator/loaders";
 
 export const metadata: Metadata = {
   title: "网格模拟器 · TradeSim",

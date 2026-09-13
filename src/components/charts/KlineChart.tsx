@@ -24,7 +24,8 @@ export interface TradeMarker {
   time: number;
   side: "buy" | "sell";
   count: number;
-  kind: "grid" | "init" | "liquidation";
+  /** 关键成交的文字（如 建仓 / 止盈 / 强平），null 显示 B / S */
+  label: string | null;
 }
 
 export const CHART_THEME = {
@@ -148,14 +149,14 @@ export function KlineChart({
     markersRef.current?.setMarkers(
       markers.map((m) => {
         const buy = m.side === "buy";
-        const label = m.kind === "init" ? "建仓" : m.kind === "liquidation" ? "强平" : buy ? "B" : "S";
+        const label = m.label ?? (buy ? "B" : "S");
         return {
           time: toTime(m.time),
           position: buy ? "belowBar" : "aboveBar",
           shape: buy ? "arrowUp" : "arrowDown",
-          color: m.kind === "liquidation" ? "#ffffff" : buy ? UP : DOWN,
+          color: m.label === "强平" ? "#ffffff" : buy ? UP : DOWN,
           text: m.count > 1 ? `${label}×${m.count}` : label,
-          size: m.kind === "grid" ? 0.6 : 1,
+          size: m.label ? 1 : 0.6,
         };
       }),
     );

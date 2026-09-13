@@ -12,13 +12,14 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
-import type { StrategyId, StrategyResult } from "@/lib/backtest/grid";
+import type { StrategyResult } from "@/lib/backtest/common";
 import { fmtDateTime, fmtPct, pnlClass } from "@/lib/format";
 import { CHART_THEME } from "./KlineChart";
 import type { TimeScaleSync } from "./timeScaleSync";
 
 const toTime = (ms: number) => (ms / 1000) as UTCTimestamp;
 const pctFormat = { type: "custom" as const, formatter: (v: number) => `${v.toFixed(2)}%`, minMove: 0.01 };
+const BASELINE_ID = "__baseline";
 
 export function EquityChart({
   results,
@@ -28,14 +29,14 @@ export function EquityChart({
   height = 320,
 }: {
   results: StrategyResult[];
-  hidden: ReadonlySet<StrategyId>;
-  onToggle: (id: StrategyId) => void;
+  hidden: ReadonlySet<string>;
+  onToggle: (id: string) => void;
   sync?: TimeScaleSync;
   height?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef(new Map<StrategyId, ISeriesApi<"Line">>());
+  const seriesRef = useRef(new Map<string, ISeriesApi<"Line">>());
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -82,6 +83,7 @@ export function EquityChart({
       priceFormat: pctFormat,
     });
     baseline.setData(results[0].equity.map((p) => ({ time: toTime(p.time), value: 0 })));
+    seriesMap.set(BASELINE_ID, baseline);
 
     for (const r of results) {
       const series = chart.addSeries(LineSeries, {
@@ -99,15 +101,13 @@ export function EquityChart({
       }
       seriesMap.set(r.id, series);
     }
-    // 基准线也放进 map 以便统一清理
-    seriesMap.set("__baseline" as StrategyId, baseline);
     if (sync) sync.fit();
     else chart.timeScale().fitContent();
   }, [results, sync]);
 
   useEffect(() => {
     for (const [id, series] of seriesRef.current) {
-      if (id !== ("__baseline" as StrategyId)) series.applyOptions({ visible: !hidden.has(id) });
+      if (id !== BASELINE_ID) series.applyOptions({ visible: !hidden.has(id) });
     }
   }, [hidden, results, sync]);
 

@@ -27,6 +27,10 @@ const FUTURES_KLINE_LIMIT = 1500;
 const FUNDING_LIMIT = 1000;
 const CHUNK_CONCURRENCY = 5;
 
+// 主域名在部分地区会直接超时：有备用数据源时快速失败，避免每次等待几十秒
+const FAST_FAIL = { timeoutMs: 8_000, retries: 0 };
+const FUTURES_API_REQUEST = { timeoutMs: 8_000, retries: 1 };
+
 // 合约接口没有公共镜像：被地区限制时改用官方历史归档 data.binance.vision。
 // BINANCE_FUTURES_SOURCE=archive 可强制使用归档。
 const FORCE_FUTURES_ARCHIVE = process.env.BINANCE_FUTURES_SOURCE === "archive";
@@ -54,14 +58,17 @@ async function spotGet<T>(path: string): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < SPOT_BASE_URLS.length; i++) {
     const index = (spotBaseIndex + i) % SPOT_BASE_URLS.length;
+    const isLast = i === SPOT_BASE_URLS.length - 1;
     try {
-      const data = await getJson<T>(SPOT_BASE_URLS[index] + path);
+      const data = await getJson<T>(SPOT_BASE_URLS[index] + path, isLast ? undefined : FAST_FAIL);
       spotBaseIndex = index;
       return data;
     } catch (err) {
       lastError = err;
       // 参数错误（如交易对不存在）换域名也没用
       if (err instanceof BinanceError && err.status === 400) throw err;
+      // 并发中的其他请求直接从下一个域名开始
+      if (spotBaseIndex === index) spotBaseIndex = (index + 1) % SPOT_BASE_URLS.length;
     }
   }
   throw lastError;
@@ -89,7 +96,7 @@ async function fetchKlineChunk(
   const raw =
     market === "spot"
       ? await spotGet<RawKline[]>(`/api/v3/klines${query}`)
-      : await getJson<RawKline[]>(`${FUTURES_BASE_URL}/fapi/v1/klines${query}`);
+      : await getJson<RawKline[]>(`${FUTURES_BASE_URL}/fapi/v1/klines${query}`, FUTURES_API_REQUEST);
 
   const candles = raw.map((k) => ({
     time: k[0],
@@ -176,6 +183,7 @@ async function fetchApiFunding(symbol: string, startTime: number, endTime: numbe
   while (cursor <= endTime) {
     const batch = await getJson<RawFunding[]>(
       `${FUTURES_BASE_URL}/fapi/v1/fundingRate?symbol=${symbol}&startTime=${cursor}&endTime=${endTime}&limit=${FUNDING_LIMIT}`,
+      FUTURES_API_REQUEST,
     );
     for (const f of batch) {
       const markPrice = Number(f.markPrice);
@@ -233,7 +241,7 @@ export async function fetchSymbols(market: MarketType): Promise<SymbolInfo[]> {
           contractType: string;
           onboardDate: number;
         }[];
-      }>(`${FUTURES_BASE_URL}/fapi/v1/exchangeInfo`);
+      }>(`${FUTURES_BASE_URL}/fapi/v1/exchangeInfo`, FUTURES_API_REQUEST);
       symbols = info.symbols
         .filter((s) => s.quoteAsset === "USDT" && s.status === "TRADING" && s.contractType === "PERPETUAL")
         .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset, onboardDate: s.onboardDate }));
