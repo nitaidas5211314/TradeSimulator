@@ -28,6 +28,13 @@ export interface TradeMarker {
   label: string | null;
 }
 
+/** 带标题的水平线，如挂单价、持仓均价 */
+export interface PriceLine {
+  price: number;
+  color: string;
+  title: string;
+}
+
 export const CHART_THEME = {
   layout: {
     background: { type: ColorType.Solid, color: "transparent" },
@@ -47,19 +54,29 @@ const DOWN = "#f6465d";
 const ACCENT = "#f0b90b";
 /** 网格线过多时只画上下限，避免图表卡顿 */
 const MAX_GRID_LINES = 200;
+const NO_LEVELS: number[] = [];
+const NO_PRICE_LINES: PriceLine[] = [];
 
 const toTime = (ms: number) => (ms / 1000) as UTCTimestamp;
+const toBar = (c: Candle) => ({ time: toTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close });
+const toVolume = (c: Candle) => ({
+  time: toTime(c.time),
+  value: c.volume,
+  color: c.close >= c.open ? "rgba(14,203,129,0.35)" : "rgba(246,70,93,0.35)",
+});
 
 export function KlineChart({
   candles,
-  levels,
+  levels = NO_LEVELS,
   markers,
+  priceLines = NO_PRICE_LINES,
   sync,
   height = 440,
 }: {
   candles: Candle[];
-  levels: number[];
+  levels?: number[];
   markers: TradeMarker[];
+  priceLines?: PriceLine[];
   sync?: TimeScaleSync;
   height?: number;
 }) {
@@ -68,7 +85,9 @@ export function KlineChart({
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const levelLinesRef = useRef<IPriceLine[]>([]);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const renderedRef = useRef<Candle[] | null>(null);
 
   useEffect(() => {
     const chart = createChart(containerRef.current!, { ...CHART_THEME, autoSize: true });
@@ -100,23 +119,37 @@ export function KlineChart({
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
       markersRef.current = null;
+      levelLinesRef.current = [];
       priceLinesRef.current = [];
+      renderedRef.current = null;
     };
   }, [sync]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
-    if (!series || candles.length === 0) return;
+    const volume = volumeSeriesRef.current;
+    if (!series || !volume || candles.length === 0) return;
+    const previous = renderedRef.current;
+    renderedRef.current = candles;
+
+    // 复盘时K线逐根追加：增量更新，保持当前缩放位置
+    if (
+      previous &&
+      previous.length > 0 &&
+      candles.length > previous.length &&
+      candles[previous.length - 1] === previous[previous.length - 1]
+    ) {
+      for (let i = previous.length; i < candles.length; i++) {
+        series.update(toBar(candles[i]));
+        volume.update(toVolume(candles[i]));
+      }
+      return;
+    }
+
     const precision = pricePrecision(candles[0].open);
     series.applyOptions({ priceFormat: { type: "price", precision, minMove: Math.pow(10, -precision) } });
-    series.setData(candles.map((c) => ({ time: toTime(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
-    volumeSeriesRef.current?.setData(
-      candles.map((c) => ({
-        time: toTime(c.time),
-        value: c.volume,
-        color: c.close >= c.open ? "rgba(14,203,129,0.35)" : "rgba(246,70,93,0.35)",
-      })),
-    );
+    series.setData(candles.map(toBar));
+    volume.setData(candles.map(toVolume));
     if (sync) sync.fit();
     else chartRef.current?.timeScale().fitContent();
   }, [candles, sync]);
@@ -124,15 +157,15 @@ export function KlineChart({
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
-    for (const line of priceLinesRef.current) series.removePriceLine(line);
-    priceLinesRef.current = [];
+    for (const line of levelLinesRef.current) series.removePriceLine(line);
+    levelLinesRef.current = [];
     if (levels.length < 2) return;
 
     const drawAll = levels.length <= MAX_GRID_LINES + 1;
     levels.forEach((price, i) => {
       const edge = i === 0 || i === levels.length - 1;
       if (!edge && !drawAll) return;
-      priceLinesRef.current.push(
+      levelLinesRef.current.push(
         series.createPriceLine({
           price,
           color: edge ? ACCENT : "rgba(240,185,11,0.22)",
@@ -144,6 +177,22 @@ export function KlineChart({
       );
     });
   }, [levels, sync]);
+
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    for (const line of priceLinesRef.current) series.removePriceLine(line);
+    priceLinesRef.current = priceLines.map((p) =>
+      series.createPriceLine({
+        price: p.price,
+        color: p.color,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: p.title,
+      }),
+    );
+  }, [priceLines, sync]);
 
   useEffect(() => {
     markersRef.current?.setMarkers(

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { StrategyResult } from "@/lib/backtest/common";
-import type { TradeAction } from "@/lib/backtest/engine";
+import type { Trade, TradeAction } from "@/lib/backtest/engine";
 import { fmtDateTime, fmtPrice, fmtQty, fmtUsd, pnlClass } from "@/lib/format";
 
 const PAGE_SIZE = 50;
@@ -23,13 +22,13 @@ const ACTION_LABEL: Record<TradeAction, string> = {
   liquidation: "强制平仓",
 };
 
-export function TradesTable({ result }: { result: StrategyResult }) {
-  // 切换策略或结果变化时回到第一页
-  const [pageState, setPageState] = useState({ trades: result.trades, page: 0 });
-  const trades = result.trades;
+export function TradesTable({ trades, newestFirst = false }: { trades: Trade[]; newestFirst?: boolean }) {
+  // 切换策略或成交变化时回到第一页
+  const [pageState, setPageState] = useState({ trades, page: 0 });
   const page = pageState.trades === trades ? pageState.page : 0;
   const pageCount = Math.max(1, Math.ceil(trades.length / PAGE_SIZE));
-  const rows = trades.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const ordered = newestFirst ? [...trades].reverse() : trades;
+  const rows = ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const goto = (p: number) => setPageState({ trades, page: Math.min(Math.max(p, 0), pageCount - 1) });
 
   const th = "whitespace-nowrap px-3 py-2 text-right font-normal";

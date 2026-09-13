@@ -24,6 +24,11 @@ export const ArbitrageSimulatorLoader = dynamic(() => import("@/components/arbit
   loading: () => <LoadingPlaceholder />,
 });
 
+export const ReplaySimulatorLoader = dynamic(() => import("@/components/replay/ReplaySimulator"), {
+  ssr: false,
+  loading: () => <LoadingPlaceholder />,
+});
+
 function LoadingPlaceholder() {
   return <div className="p-8 text-sm text-muted">正在加载模拟器…</div>;
 }

@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/dca", label: "定投" },
   { href: "/martingale", label: "马丁格尔" },
   { href: "/arbitrage", label: "期现套利" },
+  { href: "/replay", label: "K线复盘" },
 ];
 
 export function NavLinks() {

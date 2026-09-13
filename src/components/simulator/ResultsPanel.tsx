@@ -2,30 +2,19 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { EquityChart } from "@/components/charts/EquityChart";
-import { KlineChart, type TradeMarker } from "@/components/charts/KlineChart";
+import { KlineChart } from "@/components/charts/KlineChart";
 import { createTimeScaleSync, type TimeScaleSync } from "@/components/charts/timeScaleSync";
 import { TradingViewWidget, toTradingViewInterval, toTradingViewRange } from "@/components/charts/TradingViewWidget";
 import { Card, Segmented } from "@/components/ui/controls";
 import type { StrategyResult } from "@/lib/backtest/common";
-import type { TradeAction } from "@/lib/backtest/engine";
 import { DatasetSummary } from "./DatasetSummary";
 import { StatsTable, type StatColumn } from "./StatsTable";
+import { buildTradeMarkers } from "./tradeMarkers";
 import { TradesTable } from "./TradesTable";
 import type { MarketDataState } from "./useMarketData";
 
 const NO_LEVELS: number[] = [];
 const NO_COLUMNS: StatColumn[] = [];
-
-// 关键成交在K线上显示文字，其余显示 B / S
-const MARKER_LABEL: Partial<Record<TradeAction, string>> = {
-  init: "建仓",
-  takeProfit: "止盈",
-  stopLoss: "止损",
-  stop: "停止",
-  hedgeOpen: "入场",
-  hedgeClose: "离场",
-  liquidation: "强平",
-};
 
 /** 行情概览、K线与 TradingView、收益曲线、指标对比、成交明细 */
 export function ResultsPanel({
@@ -65,18 +54,10 @@ export function ResultsPanel({
     results?.[0] ??
     null;
 
-  const markers = useMemo<TradeMarker[]>(() => {
-    if (!selected || !showMarkers) return [];
-    const map = new Map<string, TradeMarker>();
-    for (const t of selected.trades) {
-      const label = MARKER_LABEL[t.action] ?? null;
-      const key = `${t.time}|${t.side}|${label}`;
-      const existing = map.get(key);
-      if (existing) existing.count++;
-      else map.set(key, { time: t.time, side: t.side, count: 1, label });
-    }
-    return [...map.values()].sort((a, b) => a.time - b.time);
-  }, [selected, showMarkers]);
+  const markers = useMemo(
+    () => (selected && showMarkers ? buildTradeMarkers(selected.trades) : []),
+    [selected, showMarkers],
+  );
 
   const toggleStrategy = useCallback((id: string) => {
     setHidden((prev) => {
@@ -200,7 +181,7 @@ export function ResultsPanel({
                 />
               }
             >
-              <TradesTable result={selected} />
+              <TradesTable trades={selected.trades} />
             </Card>
           )}
         </>
