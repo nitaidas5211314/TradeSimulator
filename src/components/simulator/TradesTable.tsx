@@ -16,6 +16,7 @@ const ACTION_LABEL: Record<TradeAction, string> = {
   safety: "加仓",
   takeProfit: "止盈",
   stopLoss: "止损",
+  stop: "触发停止",
   liquidation: "强制平仓",
 };
 
@@ -60,7 +61,7 @@ export function TradesTable({ result }: { result: StrategyResult }) {
                 </td>
                 <td
                   className={`whitespace-nowrap px-3 py-2 ${
-                    t.action === "liquidation" || t.action === "stopLoss" ? "text-down" : ""
+                    t.action === "liquidation" || t.action === "stopLoss" || t.action === "stop" ? "text-down" : ""
                   }`}
                 >
                   {ACTION_LABEL[t.action]}

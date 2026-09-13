@@ -25,6 +25,7 @@ export const statCell = {
   count: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: v.toLocaleString() }),
   price: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtPrice(v) }),
   pct: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtPct(v), className: pnlClass(v) }),
+  time: (v: Value): StatCell => (missing(v) ? statCell.dash : { text: fmtDateTime(v), className: "text-accent" }),
 };
 
 export function StatsTable({

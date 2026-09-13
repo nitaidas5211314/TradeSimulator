@@ -22,6 +22,7 @@ export type TradeAction =
   | "safety"
   | "takeProfit"
   | "stopLoss"
+  | "stop"
   | "liquidation";
 
 export interface Trade {

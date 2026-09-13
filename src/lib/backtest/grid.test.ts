@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Candle, FundingRate } from "@/lib/market/types";
-import { buildGridLevels, runGridSimulation, type GridParams } from "./grid";
+import { buildGridLevels, runGridSimulation, validateGridParams, type GridParams } from "./grid";
 import { HOUR, T0, candlesFromCloses } from "./testUtils";
 
 const baseParams: GridParams = {
@@ -15,6 +15,8 @@ const baseParams: GridParams = {
   takerFee: 0,
   maintenanceMarginRate: 0.005,
   includeFunding: true,
+  stopAbove: null,
+  stopBelow: null,
 };
 
 function run(candles: Candle[], params: Partial<GridParams>, funding: FundingRate[] = []) {
@@ -88,6 +90,41 @@ describe("spot strategies", () => {
     expect(grid.feesPaid).toBeCloseTo(feesFromTrades, 9);
     expect(grid.feesPaid).toBeGreaterThan(0);
     expect(grid.stats.pnl).toBeCloseTo(grid.realizedPnl + grid.stats.unrealizedPnl - grid.feesPaid, 9);
+  });
+});
+
+describe("grid stops", () => {
+  it("closes everything and stops when price falls to the lower stop", () => {
+    const grid = run(candlesFromCloses(100, [80, 110]), { stopBelow: 85 })("spot-grid");
+    expect(grid.trades.map((t) => `${t.action}:${t.side}@${t.price}`)).toEqual([
+      "init:buy@100",
+      "open:buy@90",
+      "stop:sell@85",
+    ]);
+    expect(grid.finalPosition).toBe(0);
+    expect(grid.metrics.stopPrice).toBe(85);
+    // 停止平仓的亏损计入持仓盈亏，不计入网格利润
+    expect(grid.realizedPnl).toBe(0);
+    expect(grid.stats.unrealizedPnl).toBeLessThan(0);
+  });
+
+  it("stops a short grid when price rises to the upper stop", () => {
+    const short = run(candlesFromCloses(100, [125, 90]), { market: "futures", stopAbove: 120 })("short-grid");
+    expect(short.trades.map((t) => t.action)).toEqual(["init", "open", "stop"]);
+    expect(short.trades.at(-1)?.price).toBe(120);
+    expect(short.finalPosition).toBe(0);
+  });
+
+  it("scans a single strategy per cell", () => {
+    const candles = candlesFromCloses(100, [110, 90, 110, 100]);
+    const results = runGridSimulation(candles, [], HOUR, baseParams, "spot-grid");
+    expect(results.map((r) => r.id)).toEqual(["spot-grid"]);
+  });
+
+  it("validates stop prices against the start price", () => {
+    expect(validateGridParams({ ...baseParams, stopAbove: 95 }, 100)).toMatch(/高于/);
+    expect(validateGridParams({ ...baseParams, stopBelow: 105 }, 100)).toMatch(/低于/);
+    expect(validateGridParams({ ...baseParams, stopAbove: 120, stopBelow: 80 }, 100)).toBeNull();
   });
 });
 

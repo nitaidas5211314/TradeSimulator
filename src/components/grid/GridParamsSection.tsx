@@ -10,6 +10,9 @@ export interface GridForm {
   gridCount: string;
   gridMode: GridMode;
   investment: string;
+  /** 留空表示不启用 */
+  stopAbove: string;
+  stopBelow: string;
 }
 
 export const DEFAULT_GRID_FORM: GridForm = {
@@ -18,6 +21,8 @@ export const DEFAULT_GRID_FORM: GridForm = {
   gridCount: "20",
   gridMode: "arithmetic",
   investment: "10000",
+  stopAbove: "",
+  stopBelow: "",
 };
 
 export interface GridInfo {
@@ -96,6 +101,28 @@ export function GridParamsSection({
       <Field label="投入资金">
         <NumberInput value={form.investment} onChange={(investment) => onChange({ investment })} suffix="USDT" min={0} />
       </Field>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="向上停止价">
+          <NumberInput
+            value={form.stopAbove}
+            onChange={(stopAbove) => onChange({ stopAbove })}
+            min={0}
+            placeholder="不启用"
+          />
+        </Field>
+        <Field label="向下停止价">
+          <NumberInput
+            value={form.stopBelow}
+            onChange={(stopBelow) => onChange({ stopBelow })}
+            min={0}
+            placeholder="不启用"
+          />
+        </Field>
+      </div>
+      <p className="text-[11px] leading-snug text-muted">
+        价格触及停止价时，全部持仓市价平仓并停止网格（止盈或止损）。留空不启用。
+      </p>
     </Section>
   );
 }

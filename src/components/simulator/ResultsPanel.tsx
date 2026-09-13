@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { EquityChart } from "@/components/charts/EquityChart";
 import { KlineChart, type TradeMarker } from "@/components/charts/KlineChart";
 import { createTimeScaleSync } from "@/components/charts/timeScaleSync";
@@ -21,6 +21,7 @@ const MARKER_LABEL: Partial<Record<TradeAction, string>> = {
   init: "建仓",
   takeProfit: "止盈",
   stopLoss: "止损",
+  stop: "停止",
   liquidation: "强平",
 };
 
@@ -32,6 +33,7 @@ export function ResultsPanel({
   columns = NO_COLUMNS,
   message,
   defaultSelectedId,
+  extraCards,
 }: {
   data: MarketDataState;
   results: StrategyResult[] | null;
@@ -41,6 +43,8 @@ export function ResultsPanel({
   /** 无结果时收益曲线处显示的提示（如参数校验错误） */
   message?: string | null;
   defaultSelectedId?: string;
+  /** 指标对比表之后追加的卡片（如参数扫描） */
+  extraCards?: ReactNode;
 }) {
   const { dataset, loading, error, stale } = data;
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
@@ -174,6 +178,8 @@ export function ResultsPanel({
           <Card title="策略指标对比">
             <StatsTable results={results} futures={dataset?.market === "futures"} columns={columns} />
           </Card>
+
+          {extraCards}
 
           {selected && (
             <Card

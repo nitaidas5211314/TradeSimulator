@@ -10,6 +10,7 @@ import {
   type StrategyRun,
 } from "./common";
 import type { Strategy, StrategyContext } from "./engine";
+import { toScanResult, type ScanResult } from "./scan";
 
 export type GridMode = "arithmetic" | "geometric";
 export type GridDirection = "long" | "short" | "neutral";
@@ -28,6 +29,10 @@ export interface GridParams extends CostParams {
   upper: number;
   gridCount: number;
   gridMode: GridMode;
+  /** 价格涨到该价时全部平仓并停止，null 表示不启用 */
+  stopAbove: number | null;
+  /** 价格跌到该价时全部平仓并停止，null 表示不启用 */
+  stopBelow: number | null;
 }
 
 export const MAX_GRID_COUNT = 500;
@@ -57,12 +62,19 @@ export function gridProfitRange(levels: number[], makerFee: number) {
   return { min, max };
 }
 
-export function validateGridParams(p: GridParams): string | null {
+/** startPrice 为回测开盘价，提供时会检查停止价是否位于开盘价两侧 */
+export function validateGridParams(p: GridParams, startPrice?: number): string | null {
   if (!(p.investment > 0)) return "投入资金必须大于 0";
   if (!(p.lower > 0) || !(p.upper > 0)) return "价格上下限必须大于 0";
   if (p.lower >= p.upper) return "价格下限必须小于价格上限";
   if (!Number.isInteger(p.gridCount) || p.gridCount < 2 || p.gridCount > MAX_GRID_COUNT) {
     return `网格数量须为 2 ~ ${MAX_GRID_COUNT} 的整数`;
+  }
+  if (p.stopAbove !== null && !(p.stopAbove > 0)) return "向上停止价必须大于 0";
+  if (p.stopBelow !== null && !(p.stopBelow > 0)) return "向下停止价必须大于 0";
+  if (startPrice !== undefined) {
+    if (p.stopAbove !== null && p.stopAbove <= startPrice) return "向上停止价须高于回测开盘价";
+    if (p.stopBelow !== null && p.stopBelow >= startPrice) return "向下停止价须低于回测开盘价";
   }
   return validateCosts(p.market, p);
 }
@@ -108,11 +120,20 @@ export function buildGridCells(
   return { levels, side, open, qtyPerCell: notional / (capitalPerUnit * (1 + feeReserve)) };
 }
 
-export function gridStrategy(cells: GridCells): Strategy {
+export interface GridStops {
+  above: number | null;
+  below: number | null;
+}
+
+const NO_STOPS: GridStops = { above: null, below: null };
+
+export function gridStrategy(cells: GridCells, stops: GridStops = NO_STOPS): Strategy {
   const { levels, side, qtyPerCell: q } = cells;
   const cellCount = levels.length - 1;
   const open = cells.open.slice();
   const entry = new Array<number>(cellCount).fill(0);
+  let stopTime: number | null = null;
+  let stopPrice: number | null = null;
 
   const fill = (ctx: StrategyContext, cell: number, price: number) => {
     const opening = !open[cell];
@@ -123,6 +144,33 @@ export function gridStrategy(cells: GridCells): Strategy {
     else profit = side[cell] * q * (price - entry[cell]);
     open[cell] = opening;
     ctx.trade(buy ? q : -q, price, { maker: true, action: opening ? "open" : "close", profit });
+  };
+
+  // 下跌：触发买单（多头格开仓 @lo、空头格平仓 @lo）
+  const matchDown = (ctx: StrategyContext, a: number, b: number) => {
+    for (let j = upperBound(levels, a) - 1; j >= 0 && levels[j] >= b; j--) {
+      if (j >= cellCount) continue;
+      const isBuyOrder = side[j] === 1 ? !open[j] : open[j];
+      if (isBuyOrder) fill(ctx, j, levels[j]);
+    }
+  };
+
+  // 上涨：触发卖单（多头格平仓 @hi、空头格开仓 @hi）
+  const matchUp = (ctx: StrategyContext, a: number, b: number) => {
+    for (let j = lowerBound(levels, a); j < levels.length && levels[j] <= b; j++) {
+      if (j === 0) continue;
+      const cell = j - 1;
+      const isSellOrder = side[cell] === 1 ? open[cell] : !open[cell];
+      if (isSellOrder) fill(ctx, cell, levels[j]);
+    }
+  };
+
+  const stopAll = (ctx: StrategyContext, price: number) => {
+    stopTime = ctx.time;
+    stopPrice = price;
+    open.fill(false);
+    // 停止时的方向性盈亏计入持仓盈亏，不计入网格利润
+    if (ctx.position !== 0) ctx.trade(-ctx.position, price, { maker: false, action: "stop" });
   };
 
   return {
@@ -137,35 +185,40 @@ export function gridStrategy(cells: GridCells): Strategy {
     },
 
     onMove(ctx, a, b) {
-      if (b < a) {
-        // 下跌：触发买单（多头格开仓 @lo、空头格平仓 @lo）
-        for (let j = upperBound(levels, a) - 1; j >= 0 && levels[j] >= b; j--) {
-          if (j >= cellCount) continue;
-          const isBuyOrder = side[j] === 1 ? !open[j] : open[j];
-          if (isBuyOrder) fill(ctx, j, levels[j]);
+      if (stopTime !== null) return;
+      if (b > a) {
+        if (stops.above !== null && b >= stops.above) {
+          const trigger = Math.max(a, stops.above);
+          matchUp(ctx, a, trigger);
+          stopAll(ctx, trigger);
+        } else {
+          matchUp(ctx, a, b);
         }
+      } else if (stops.below !== null && b <= stops.below) {
+        const trigger = Math.min(a, stops.below);
+        matchDown(ctx, a, trigger);
+        stopAll(ctx, trigger);
       } else {
-        // 上涨：触发卖单（多头格平仓 @hi、空头格开仓 @hi）
-        for (let j = lowerBound(levels, a); j < levels.length && levels[j] <= b; j++) {
-          if (j === 0) continue;
-          const cell = j - 1;
-          const isSellOrder = side[cell] === 1 ? open[cell] : !open[cell];
-          if (isSellOrder) fill(ctx, cell, levels[j]);
-        }
+        matchDown(ctx, a, b);
       }
     },
+
+    metrics: () => ({ stopTime, stopPrice }),
   };
 }
 
+/** only 指定时只回测该策略（参数扫描用） */
 export function runGridSimulation(
   candles: Candle[],
   funding: FundingRate[],
   intervalMs: number,
   p: GridParams,
+  only?: string,
 ): StrategyResult[] {
   const startPrice = candles[0].open;
   const levels = buildGridLevels(p.lower, p.upper, p.gridCount, p.gridMode);
   const notional = p.investment * p.leverage;
+  const stops: GridStops = { above: p.stopAbove, below: p.stopBelow };
 
   const runs: StrategyRun[] =
     p.market === "spot"
@@ -180,6 +233,7 @@ export function runGridSimulation(
             meta: GRID_META["spot-grid"],
             strategy: gridStrategy(
               buildGridCells(levels, "long", startPrice, p.investment, Math.max(p.makerFee, p.takerFee)),
+              stops,
             ),
           },
         ]
@@ -188,11 +242,38 @@ export function runGridSimulation(
           ...(["long", "short", "neutral"] as const).map((direction) => ({
             id: `${direction}-grid`,
             meta: GRID_META[`${direction}-grid`],
-            strategy: gridStrategy(buildGridCells(levels, direction, startPrice, notional, 0)),
+            strategy: gridStrategy(buildGridCells(levels, direction, startPrice, notional, 0), stops),
           })),
         ];
 
-  return runStrategies({ candles, funding, intervalMs, market: p.market, investment: p.investment, costs: p }, runs);
+  return runStrategies(
+    { candles, funding, intervalMs, market: p.market, investment: p.investment, costs: p },
+    only ? runs.filter((r) => r.id === only) : runs,
+  );
+}
+
+export const GRID_SCAN_WIDTHS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5];
+export const GRID_SCAN_COUNTS = [5, 10, 15, 20, 30, 40, 60, 80, 100];
+
+/** 参数扫描单元：以开盘价为中心 ±width 设置区间，gridCount 格 */
+export function runGridScanCell(
+  candles: Candle[],
+  funding: FundingRate[],
+  intervalMs: number,
+  base: GridParams,
+  strategyId: string,
+  width: number,
+  gridCount: number,
+): ScanResult {
+  const p0 = candles[0].open;
+  const [result] = runGridSimulation(
+    candles,
+    funding,
+    intervalMs,
+    { ...base, lower: p0 * (1 - width), upper: p0 * (1 + width), gridCount },
+    strategyId,
+  );
+  return toScanResult(result);
 }
 
 /** 第一个 >= value 的下标 */
