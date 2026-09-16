@@ -145,14 +145,14 @@ export function KlineChart({
     const previous = renderedRef.current;
     renderedRef.current = candles;
 
-    // 复盘时K线逐根追加：增量更新，保持当前缩放位置
+    // 复盘逐根追加、模拟盘最后一根随实时价变化：增量更新，保持当前缩放位置
     if (
       previous &&
-      previous.length > 0 &&
-      candles.length > previous.length &&
-      candles[previous.length - 1] === previous[previous.length - 1]
+      previous.length > 1 &&
+      candles.length >= previous.length &&
+      candles[previous.length - 2] === previous[previous.length - 2]
     ) {
-      for (let i = previous.length; i < candles.length; i++) {
+      for (let i = previous.length - 1; i < candles.length; i++) {
         series.update(toBar(candles[i]));
         volume.update(toVolume(candles[i]));
       }

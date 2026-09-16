@@ -46,12 +46,31 @@ export function fmtPct(ratio: number | null, signed = true, digits = 2): string 
   return signed && ratio > 0 ? `+${text}` : text;
 }
 
+/** 持续时长，如 3天5小时 / 2小时8分 / 45秒 */
+export function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const sec = Math.floor(ms / 1000);
+  const days = Math.floor(sec / 86400);
+  const hours = Math.floor((sec % 86400) / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  if (days > 0) return hours > 0 ? `${days}天${hours}小时` : `${days}天`;
+  if (hours > 0) return minutes > 0 ? `${hours}小时${minutes}分` : `${hours}小时`;
+  if (minutes > 0) return `${minutes}分`;
+  return `${sec}秒`;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** UTC 时间 yyyy-MM-dd HH:mm */
 export function fmtDateTime(ms: number): string {
   const d = new Date(ms);
   return `${fmtDate(ms)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** UTC 时间 HH:mm:ss */
+export function fmtTime(ms: number): string {
+  const d = new Date(ms);
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
 /** UTC 日期 yyyy-MM-dd */
