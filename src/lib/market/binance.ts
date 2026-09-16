@@ -9,6 +9,7 @@ import {
   type KlineInterval,
   type MarketType,
   type SymbolInfo,
+  type Ticker,
 } from "./types";
 
 // 服务端 Binance 公共行情客户端（无需 API Key）
@@ -260,4 +261,73 @@ export async function fetchSymbols(market: MarketType): Promise<SymbolInfo[]> {
 
   symbolCache.set(market, { at: Date.now(), symbols });
   return symbols;
+}
+
+interface RawTicker {
+  lastPrice: string;
+  openPrice: string;
+  highPrice: string;
+  lowPrice: string;
+  quoteVolume: string;
+  closeTime: number;
+}
+
+interface RawPremiumIndex {
+  lastFundingRate: string;
+  nextFundingTime: number;
+}
+
+// 实时行情变化快，只做极短缓存，避免多个页面同时轮询时重复请求
+const TICKER_CACHE_MS = 1500;
+const tickerCache = new LruCache<{ at: number; ticker: Ticker }>(200);
+
+function toTicker(market: MarketType, symbol: string, raw: RawTicker, premium: RawPremiumIndex | null): Ticker {
+  const open = Number(raw.openPrice);
+  const price = Number(raw.lastPrice);
+  return {
+    market,
+    symbol,
+    price,
+    open,
+    high: Number(raw.highPrice),
+    low: Number(raw.lowPrice),
+    changePercent: open > 0 ? price / open - 1 : 0,
+    quoteVolume: Number(raw.quoteVolume),
+    time: raw.closeTime || Date.now(),
+    funding: premium ? { rate: Number(premium.lastFundingRate), nextTime: premium.nextFundingTime } : null,
+    approx: false,
+  };
+}
+
+async function fetchSpotTicker(symbol: string): Promise<Ticker> {
+  return toTicker("spot", symbol, await spotGet<RawTicker>(`/api/v3/ticker/24hr?symbol=${symbol}`), null);
+}
+
+/** 实时行情快照；合约接口受地区限制时用现货价格近似（历史归档没有实时价） */
+export async function fetchTicker(market: MarketType, symbol: string): Promise<Ticker> {
+  const key = `${market}|${symbol}`;
+  const cached = tickerCache.get(key);
+  if (cached && Date.now() - cached.at < TICKER_CACHE_MS) return cached.ticker;
+
+  let ticker: Ticker;
+  if (market === "spot") {
+    ticker = await fetchSpotTicker(symbol);
+  } else {
+    const { data } = await withFuturesFallback<Ticker>(
+      async () => {
+        const [raw, premium] = await Promise.all([
+          getJson<RawTicker>(`${FUTURES_BASE_URL}/fapi/v1/ticker/24hr?symbol=${symbol}`, FUTURES_API_REQUEST),
+          getJson<RawPremiumIndex>(`${FUTURES_BASE_URL}/fapi/v1/premiumIndex?symbol=${symbol}`, FUTURES_API_REQUEST).catch(
+            () => null,
+          ),
+        ]);
+        return toTicker("futures", symbol, raw, premium);
+      },
+      async () => ({ ...(await fetchSpotTicker(symbol)), market: "futures", approx: true }),
+    );
+    ticker = data;
+  }
+
+  tickerCache.set(key, { at: Date.now(), ticker });
+  return ticker;
 }

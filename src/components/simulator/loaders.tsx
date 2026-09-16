@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 
-// 模拟器依赖浏览器端图表和当前日期，关闭 SSR 避免水合不一致
+// 模拟器依赖浏览器端图表、当前日期与本地存储，关闭 SSR 避免水合不一致
 
 export const GridSimulatorLoader = dynamic(() => import("@/components/grid/GridSimulator"), {
   ssr: false,
@@ -35,6 +35,11 @@ export const TrendSimulatorLoader = dynamic(() => import("@/components/trend/Tre
 });
 
 export const RebalanceSimulatorLoader = dynamic(() => import("@/components/rebalance/RebalanceSimulator"), {
+  ssr: false,
+  loading: () => <LoadingPlaceholder />,
+});
+
+export const PaperTraderLoader = dynamic(() => import("@/components/paper/PaperTrader"), {
   ssr: false,
   loading: () => <LoadingPlaceholder />,
 });

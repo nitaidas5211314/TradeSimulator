@@ -8,6 +8,7 @@ import {
   type KlineInterval,
   type MarketType,
   type SymbolInfo,
+  type Ticker,
 } from "./types";
 
 // 浏览器端调用本站 API 路由
@@ -144,6 +145,10 @@ export async function loadPortfolioDataset(r: DatasetRequest, symbols: string[])
     symbols,
     assetCandles,
   };
+}
+
+export async function loadTicker(market: MarketType, symbol: string): Promise<Ticker> {
+  return getJson<Ticker>(`/api/ticker?market=${market}&symbol=${symbol}`);
 }
 
 export async function loadSymbols(market: MarketType): Promise<SymbolInfo[]> {

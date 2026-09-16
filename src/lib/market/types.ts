@@ -58,3 +58,23 @@ export function fromCompact(c: CompactCandle): Candle {
 
 /** 单次最多允许请求的K线数量，避免触发 Binance 限频 */
 export const MAX_CANDLES = 200_000;
+
+/** 实时行情快照（模拟盘使用） */
+export interface Ticker {
+  market: MarketType;
+  symbol: string;
+  price: number;
+  /** 24 小时开盘价、最高价、最低价 */
+  open: number;
+  high: number;
+  low: number;
+  /** 24 小时涨跌幅，小数 */
+  changePercent: number;
+  /** 24 小时成交额（USDT） */
+  quoteVolume: number;
+  time: number;
+  /** 合约当前资金费率与下次结算时间 */
+  funding: { rate: number; nextTime: number } | null;
+  /** 合约实时接口受地区限制，价格用现货近似 */
+  approx: boolean;
+}
